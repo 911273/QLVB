@@ -153,8 +153,9 @@ function statCardText(text, lbl) {
 
 function loadStats() {
   call('apiGetStats').then(function (s) {
-    renderBarList('#typeChart', s.byType.map(function (t) { return { label: t.name, count: t.count }; }));
-    renderBarList('#yearChart', s.byYear.map(function (y) { return { label: y.year, count: y.count }; }));
+    if (!s) return;
+    renderBarList('#typeChart', (s.byType || []).map(function (t) { return { label: t.name, count: t.count }; }));
+    renderBarList('#yearChart', (s.byYear || []).map(function (y) { return { label: y.year, count: y.count }; }));
   }).catch(function () {});
 }
 function renderBarList(sel, items) {
@@ -212,6 +213,7 @@ function notInit() {
 
 function renderResults(sel, res, keyword) {
   var box = $(sel);
+  if (!res) { res = { items: [], total: 0, page: 1, totalPages: 1 }; }
   if (!res.items || !res.items.length) {
     box.innerHTML = '<div class="empty">Không có văn bản nào.<br><span class="muted">Hãy tải văn bản lên folder Drive rồi vào tab "Quét &amp; Cập nhật".</span></div>';
     return;
@@ -264,6 +266,7 @@ function highlight(text, terms) {
 function renderPager(sel, res, fn) {
   var box = $(sel);
   box.innerHTML = '';
+  if (!res) return;
   if (res.totalPages <= 1) {
     if (res.total) box.innerHTML = '<span class="muted">Tổng ' + res.total + ' văn bản</span>';
     return;

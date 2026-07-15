@@ -227,22 +227,36 @@ function readAllDocs() {
   return values.map(rowToObj_);
 }
 
+// Ép ô về chuỗi "sạch" để google.script.run tuần tự hoá được (tránh trả null).
+function cell_(v) {
+  if (v == null) return '';
+  if (v instanceof Date) return Utilities.formatDate(v, 'Asia/Ho_Chi_Minh', "yyyy-MM-dd'T'HH:mm:ss");
+  return String(v);
+}
+// Ép ô ngày về dạng 'yyyy-MM-dd' (Sheets có thể tự đổi chuỗi ngày thành Date).
+function dateCell_(v) {
+  if (v == null || v === '') return '';
+  if (v instanceof Date) return Utilities.formatDate(v, 'Asia/Ho_Chi_Minh', 'yyyy-MM-dd');
+  var s = String(v);
+  return s.substring(0, 10); // giữ đúng 'yyyy-MM-dd' nếu lỡ có kèm giờ
+}
+
 function rowToObj_(r) {
   return {
-    fileId: r[COLS.FILE_ID],
-    fileName: r[COLS.FILE_NAME],
-    docType: r[COLS.DOC_TYPE],
-    docTypeCode: r[COLS.DOC_TYPE_CODE],
-    docNumber: r[COLS.DOC_NUMBER],
-    issuedDate: r[COLS.ISSUED_DATE],
-    title: r[COLS.TITLE],
-    content: r[COLS.CONTENT],
-    folderPath: r[COLS.FOLDER_PATH],
-    mimeType: r[COLS.MIME_TYPE],
-    fileUrl: r[COLS.FILE_URL],
-    modifiedTime: r[COLS.MODIFIED_TIME],
-    scannedAt: r[COLS.SCANNED_AT],
-    ocrStatus: r[COLS.OCR_STATUS]
+    fileId: cell_(r[COLS.FILE_ID]),
+    fileName: cell_(r[COLS.FILE_NAME]),
+    docType: cell_(r[COLS.DOC_TYPE]),
+    docTypeCode: cell_(r[COLS.DOC_TYPE_CODE]),
+    docNumber: cell_(r[COLS.DOC_NUMBER]),
+    issuedDate: dateCell_(r[COLS.ISSUED_DATE]),
+    title: cell_(r[COLS.TITLE]),
+    content: cell_(r[COLS.CONTENT]),
+    folderPath: cell_(r[COLS.FOLDER_PATH]),
+    mimeType: cell_(r[COLS.MIME_TYPE]),
+    fileUrl: cell_(r[COLS.FILE_URL]),
+    modifiedTime: cell_(r[COLS.MODIFIED_TIME]),
+    scannedAt: cell_(r[COLS.SCANNED_AT]),
+    ocrStatus: cell_(r[COLS.OCR_STATUS])
   };
 }
 
