@@ -72,7 +72,36 @@ function getOrCreateDatabase() {
     } catch (e) { /* bỏ qua nếu không di chuyển được */ }
   }
   ensureSheets_(ss);
+  migrateIssuedDates_(ss); // chuyển ngày cũ (dạng chữ) sang ngày thật để hiển thị dd/mm/yyyy
   return ss;
+}
+
+// Chuyển cột "Ngày ban hành" từ chữ 'yyyy-MM-dd' sang Date thật (chạy 1 lần).
+function migrateIssuedDates_(ss) {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('DATE_FMT_MIGRATED_V1')) return;
+  try {
+    var docs = ss.getSheetByName(DB_SHEET_DOCS);
+    var lastRow = docs.getLastRow();
+    if (lastRow >= 2) {
+      var rng = docs.getRange(2, COLS.ISSUED_DATE + 1, lastRow - 1, 1);
+      var vals = rng.getValues();
+      var changed = false;
+      for (var i = 0; i < vals.length; i++) {
+        var v = vals[i][0];
+        if (typeof v === 'string') {
+          var m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+          if (m) {
+            vals[i][0] = new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+            changed = true;
+          }
+        }
+      }
+      if (changed) rng.setValues(vals);
+      rng.setNumberFormat('dd/mm/yyyy');
+    }
+    props.setProperty('DATE_FMT_MIGRATED_V1', '1');
+  } catch (e) { /* không để migration làm hỏng luồng chính */ }
 }
 
 function ensureSheets_(ss) {
@@ -88,6 +117,11 @@ function ensureSheets_(ss) {
     docs.getRange(1, 1, 1, DB_HEADERS.length).setFontWeight('bold')
         .setBackground('#0B5394').setFontColor('#ffffff');
   }
+  // Định dạng cột "Ngày ban hành" hiển thị dd/mm/yyyy (áp dụng cho toàn cột).
+  try {
+    docs.getRange(2, COLS.ISSUED_DATE + 1, Math.max(1, docs.getMaxRows() - 1), 1)
+        .setNumberFormat('dd/mm/yyyy');
+  } catch (e) { /* bỏ qua nếu không đặt được */ }
   // Sheet NhatKy
   var log = ss.getSheetByName(DB_SHEET_LOG);
   if (!log) {
@@ -165,6 +199,16 @@ function getExistingIndex_() {
   return map;
 }
 
+// Chuyển 'yyyy-MM-dd' thành đối tượng Date (giờ địa phương) để ô Sheet hiển thị dd/mm/yyyy.
+// Trả '' nếu rỗng, hoặc giữ nguyên nếu không đúng định dạng.
+function issuedToCell_(s) {
+  if (!s) return '';
+  if (s instanceof Date) return s;
+  var m = String(s).match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+  return s;
+}
+
 function docToRow_(d) {
   var row = new Array(DB_HEADERS.length).fill('');
   row[COLS.FILE_ID] = d.fileId;
@@ -172,7 +216,7 @@ function docToRow_(d) {
   row[COLS.DOC_TYPE] = d.docType;
   row[COLS.DOC_TYPE_CODE] = d.docTypeCode;
   row[COLS.DOC_NUMBER] = d.docNumber;
-  row[COLS.ISSUED_DATE] = d.issuedDate;
+  row[COLS.ISSUED_DATE] = issuedToCell_(d.issuedDate); // ghi dạng ngày thật để Sheet hiển thị dd/mm/yyyy
   row[COLS.TITLE] = d.title;
   row[COLS.CONTENT] = d.content;
   row[COLS.FOLDER_PATH] = d.folderPath;
