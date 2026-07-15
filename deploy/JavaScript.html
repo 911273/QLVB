@@ -321,15 +321,22 @@ function addPage(box, label, page, fn, active) {
 }
 
 /* ============ Chi tiết ============ */
-// Nhúng trình xem bản gốc (PDF/ảnh) của Google Drive.
-function previewBlock_(d) {
+// Iframe xem bản gốc (PDF/ảnh) của Google Drive. cls: class CSS bổ sung.
+function previewIframe_(d, cls) {
   var mt = d.mimeType || '';
   var isPdf = mt === 'application/pdf';
   var isImg = mt.indexOf('image/') === 0;
   if (!isPdf && !isImg) return '';
   var url = 'https://drive.google.com/file/d/' + encodeURIComponent(d.fileId) + '/preview';
-  return '<h3 style="margin-top:16px">Bản gốc (PDF/ảnh)</h3>' +
-    '<iframe class="doc-preview" src="' + url + '"></iframe>';
+  return '<iframe class="doc-preview ' + (cls || '') + '" src="' + url + '"></iframe>';
+}
+function previewBlock_(d) {
+  var f = previewIframe_(d);
+  return f ? ('<h3 style="margin-top:16px">Bản gốc (PDF/ảnh)</h3>' + f) : '';
+}
+function setModalWide_(on) {
+  var box = document.querySelector('#modal .modal-box');
+  if (box) box.classList.toggle('wide', !!on);
 }
 
 function openDetail(fileId) {
@@ -359,6 +366,7 @@ function openDetail(fileId) {
       '<h3 style="margin-top:16px">Nội dung trích xuất' + (d.ocrProgress ? ' <span class="muted" style="font-weight:normal">(đã OCR ' + esc(d.ocrProgress) + ' trang)</span>' : '') + '</h3>' +
       '<div class="detail-content">' + (d.content ? esc(d.content) : '<i>Chưa có nội dung OCR. Xem bản gốc phía trên; nội dung sẽ có sau khi hàng đợi OCR xử lý, hoặc bấm "OCR lại" / "Sửa thông tin".</i>') + '</div>';
     $('#modalContent').innerHTML = html;
+    setModalWide_(false);
     $('#modal').classList.remove('hidden');
     var btn = $('#btnReOcr');
     if (btn) btn.addEventListener('click', function () { doReOcr(d.fileId); });
@@ -381,10 +389,7 @@ function openEditForm(d) {
     return '<option value="' + esc(it.name) + '">';
   }).join('');
 
-  var html =
-    '<h2>Sửa thông tin văn bản</h2>' +
-    '<p class="muted">Tên file: ' + esc(d.fileName) + '</p>' +
-    '<datalist id="issuerList">' + issuerList + '</datalist>' +
+  var fields =
     '<div class="edit-grid">' +
       '<label>Loại văn bản<select id="edType" class="input">' + typeOpts + '</select></label>' +
       '<label>Số/Ký hiệu<input id="edNumber" class="input" value="' + esc(d.docNumber || '') + '" placeholder="VD: 510/QĐ-ĐHĐL"></label>' +
@@ -392,14 +397,33 @@ function openEditForm(d) {
       '<label>Cấp ban hành<select id="edLevel" class="input">' + levelOpts + '</select></label>' +
       '<label>Ngày ban hành<input id="edDate" type="date" class="input" value="' + esc((d.issuedDate || '').substring(0,10)) + '"></label>' +
       '<label class="full">Trích yếu / Tiêu đề<input id="edTitle" class="input" value="' + esc(d.title || '') + '"></label>' +
-      '<label class="full">Nội dung (sửa nếu OCR sai/thiếu)<textarea id="edContent" class="input" rows="10">' + esc(d.content || '') + '</textarea></label>' +
+      '<label class="full">Nội dung (sửa nếu OCR sai/thiếu)<textarea id="edContent" class="input" rows="8">' + esc(d.content || '') + '</textarea></label>' +
     '</div>' +
     '<div class="form-row" style="margin-top:14px">' +
       '<button class="btn btn-primary" id="btnSaveEdit">Lưu thay đổi</button>' +
       '<button class="btn" id="btnCancelEdit">Huỷ</button>' +
     '</div>' +
     '<p class="muted" style="margin-top:8px">Sau khi lưu, văn bản được đánh dấu <b>"Đã sửa tay"</b> và sẽ <b>không bị ghi đè</b> khi quét lại. Muốn OCR lại đè lên, mở chi tiết và bấm "OCR lại".</p>';
+
+  var preview = previewIframe_(d, 'edit-frame');
+  var body;
+  if (preview) {
+    body =
+      '<div class="edit-layout">' +
+        '<div class="edit-preview"><div class="muted" style="margin-bottom:6px">Bản gốc — đọc để đối chiếu khi nhập</div>' + preview + '</div>' +
+        '<div class="edit-fields">' + fields + '</div>' +
+      '</div>';
+  } else {
+    body = fields;
+  }
+
+  var html =
+    '<h2>Sửa thông tin văn bản</h2>' +
+    '<p class="muted">Tên file: ' + esc(d.fileName) + '</p>' +
+    '<datalist id="issuerList">' + issuerList + '</datalist>' +
+    body;
   $('#modalContent').innerHTML = html;
+  setModalWide_(!!preview);
   $('#modal').classList.remove('hidden');
   $('#btnCancelEdit').addEventListener('click', function () { openDetail(d.fileId); });
   $('#btnSaveEdit').addEventListener('click', function () { saveEdit(d.fileId); });
@@ -432,7 +456,7 @@ function saveEdit(fileId) {
   }).catch(function (err) { showLoading(false); toast('Lỗi lưu: ' + (err.message || err), 'err'); });
 }
 function row(k, v) { return '<div class="k">' + k + '</div><div>' + v + '</div>'; }
-function closeModal() { $('#modal').classList.add('hidden'); }
+function closeModal() { $('#modal').classList.add('hidden'); setModalWide_(false); }
 
 function doReOcr(fileId) {
   showLoading(true, 'Đang OCR lại (có thể mất chút thời gian)...');

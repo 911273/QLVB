@@ -153,6 +153,18 @@
   .edit-grid textarea.input { resize: vertical; font-family: inherit; line-height: 1.5; }
   @media (max-width: 640px){ .edit-grid { grid-template-columns: 1fr; } }
 
+  /* Sửa thông tin có xem PDF song song */
+  .modal-box.wide { max-width: 1180px; }
+  .edit-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+  .edit-preview { position: sticky; top: 0; }
+  .edit-frame { width: 100%; height: 74vh; border: 1px solid var(--border); border-radius: 8px; }
+  .edit-fields .edit-grid { grid-template-columns: 1fr; } /* cột phải: xếp dọc cho gọn */
+  @media (max-width: 860px){
+    .edit-layout { grid-template-columns: 1fr; }
+    .edit-preview { position: static; }
+    .edit-frame { height: 50vh; }
+  }
+
   .pager { display: flex; gap: 6px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
   .pager button { min-width: 34px; }
   .pager button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
