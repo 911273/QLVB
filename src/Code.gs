@@ -96,11 +96,23 @@ var METHOD_PERM = {
   login: 'PUBLIC',
   getStatus: null, changePassword: null, logout: null,
   search: 'view', getDetail: 'view', getStats: 'view', getUploadInfo: 'view', findDuplicates: 'view',
+  exportCsv: 'view',
   updateDoc: 'edit', reOcr: 'edit', deleteDoc: 'delete',
+  listTrash: 'delete', restoreDoc: 'delete', purgeDoc: 'delete', emptyTrash: 'delete',
   scan: 'scan', ocrQueueRun: 'scan', setOcrAuto: 'scan', setOcrLimit: 'scan', setAutoScan: 'scan',
+  uploadFile: 'scan',
   saveDocTypes: 'config', resetDocTypes: 'config', saveIssuers: 'config', resetIssuers: 'config',
   setVisionKey: 'config', testVision: 'config', initialize: 'config', logoInfo: 'config',
-  listAccounts: 'accounts', saveAccount: 'accounts', deleteAccount: 'accounts', resetPassword: 'accounts'
+  listAccounts: 'accounts', saveAccount: 'accounts', deleteAccount: 'accounts', resetPassword: 'accounts',
+  listAudit: 'accounts'
+};
+
+// Các thao tác cần ghi nhật ký hoạt động.
+var AUDIT_METHODS = {
+  updateDoc: 1, deleteDoc: 1, restoreDoc: 1, purgeDoc: 1, emptyTrash: 1, reOcr: 1, scan: 1,
+  uploadFile: 1, saveDocTypes: 1, saveIssuers: 1, setVisionKey: 1, changePassword: 1,
+  saveAccount: 1, deleteAccount: 1, resetPassword: 1, initialize: 1,
+  setAutoScan: 1, setOcrAuto: 1, setOcrLimit: 1
 };
 
 /**
@@ -108,7 +120,11 @@ var METHOD_PERM = {
  */
 function apiDispatch(token, method, payload) {
   payload = payload || {};
-  if (method === 'login') return authLogin_(payload.email, payload.password);
+  if (method === 'login') {
+    var r = authLogin_(payload.email, payload.password);
+    auditLog_(payload.email, 'login', '');
+    return r;
+  }
 
   var acc = authVerify_(token); // ném lỗi AUTH nếu token sai/hết hạn
   if (!METHOD_PERM.hasOwnProperty(method)) throw new Error('Chức năng không hợp lệ.');
@@ -117,6 +133,12 @@ function apiDispatch(token, method, payload) {
     throw new Error('Bạn không có quyền thực hiện chức năng này.');
   }
 
+  var result = routeMethod_(method, payload, acc);
+  if (AUDIT_METHODS[method]) auditLog_(acc.email, method, auditDetail_(method, payload));
+  return result;
+}
+
+function routeMethod_(method, payload, acc) {
   switch (method) {
     case 'getStatus':    return apiGetStatus(acc);
     case 'changePassword': return changePassword_(acc, payload.oldPassword, payload.newPassword);
@@ -128,7 +150,11 @@ function apiDispatch(token, method, payload) {
     case 'getUploadInfo': return apiGetUploadInfo();
     case 'updateDoc':    return updateDocManual(payload);
     case 'reOcr':        return reOcrDoc(payload.fileId);
-    case 'deleteDoc':    return deleteDocById_(payload.fileId, payload.trashFile);
+    case 'deleteDoc':    return deleteDocToTrash_(payload.fileId, acc.email);
+    case 'listTrash':    return listTrash_();
+    case 'restoreDoc':   return restoreDoc_(payload.fileId);
+    case 'purgeDoc':     return purgeDoc_(payload.fileId);
+    case 'emptyTrash':   return emptyTrash_();
     case 'scan':         return scanDrive({ force: !!payload.force });
     case 'ocrQueueRun':  return apiOcrQueueRun();
     case 'setOcrAuto':   return apiSetOcrAuto(payload.enable, payload.hours);
@@ -146,6 +172,9 @@ function apiDispatch(token, method, payload) {
     case 'saveAccount':  return saveAccount_(payload);
     case 'deleteAccount': return deleteAccount_(payload.email, acc.email);
     case 'resetPassword': return adminResetPassword_(payload.email, payload.newPassword);
+    case 'listAudit':    return listAudit_(payload.limit);
+    case 'exportCsv':    return exportDocsCsv_(payload);
+    case 'uploadFile':   return uploadFile_(payload, acc);
     default: throw new Error('Chức năng không hợp lệ.');
   }
 }
@@ -195,6 +224,9 @@ function apiGetStatus(acc) {
     docTypes: getDocTypes(),
     issuers: getIssuers(),
     issuerLevels: getIssuerLevels(),
+    statusOptions: getStatusOptions(),
+    securityOptions: getSecurityOptions(),
+    urgencyOptions: getUrgencyOptions(),
     totalDocs: countDocs_(),
     visionEnabled: hasVisionKey_(),
     ocrPending: ocrQueueCount(),
@@ -202,6 +234,7 @@ function apiGetStatus(acc) {
     ocrDailyLimit: getOcrDailyLimit(),
     ocrUsedToday: ocrUsedToday_(),
     duplicates: getDuplicateCount_(),
+    trashCount: trashCount_(),
     userEmail: (acc ? acc.email : Session.getActiveUser().getEmail()),
     me: (acc ? publicAccount_(acc) : null)
   };

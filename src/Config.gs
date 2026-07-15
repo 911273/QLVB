@@ -208,6 +208,11 @@ function getDefaultIssuers() {
   ];
 }
 
+/* ===================== TRẠNG THÁI / ĐỘ MẬT / ĐỘ KHẨN ===================== */
+function getStatusOptions() { return ['Mới', 'Đang xử lý', 'Hoàn thành', 'Lưu trữ']; }
+function getSecurityOptions() { return ['Thường', 'Mật', 'Tối mật']; }
+function getUrgencyOptions() { return ['Thường', 'Khẩn', 'Thượng khẩn']; }
+
 function getIssuers() {
   var raw = PropertiesService.getScriptProperties().getProperty(PROP_ISSUERS);
   if (raw) {

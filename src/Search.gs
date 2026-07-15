@@ -30,6 +30,8 @@ function searchDocs(query) {
     if (query.issuerLevel && d.issuerLevel !== query.issuerLevel) return false;
     if (issuerKw && normalizeVi_(d.issuer || '').indexOf(issuerKw) === -1) return false;
     if (numberKw && normalizeVi_(d.docNumber || '').indexOf(numberKw) === -1) return false;
+    if (query.status && d.status !== query.status) return false;
+    if (query.security && d.security !== query.security) return false;
     if (query.fromDate && (!d.issuedDate || d.issuedDate < query.fromDate)) return false;
     if (query.toDate && (!d.issuedDate || d.issuedDate > query.toDate)) return false;
     if (terms.length) {
@@ -67,6 +69,9 @@ function searchDocs(query) {
       title: d.title,
       issuer: d.issuer,
       issuerLevel: d.issuerLevel,
+      status: d.status,
+      security: d.security,
+      urgency: d.urgency,
       folderPath: d.folderPath,
       mimeType: d.mimeType,
       fileUrl: d.fileUrl,

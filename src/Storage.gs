@@ -21,14 +21,18 @@ var COLS = {
   OCR_STATUS: 13,    // 'ok' | 'ok-vision' | 'manual' | 'pending' | 'partial' | 'skip' | 'skip-large' | 'error'
   ISSUER: 14,        // Đơn vị ban hành (tên)
   ISSUER_LEVEL: 15,  // Cấp ban hành (Chính phủ, Bộ/Ngành, Trường, Khoa, Phòng/Ban...)
-  OCR_PROGRESS: 16   // Tiến độ OCR dạng 'done/total' (số trang đã OCR / tổng số trang)
+  OCR_PROGRESS: 16,  // Tiến độ OCR dạng 'done/total' (số trang đã OCR / tổng số trang)
+  STATUS: 17,        // Trạng thái xử lý
+  SECURITY: 18,      // Độ mật
+  URGENCY: 19        // Độ khẩn
 };
 
 var DB_HEADERS = [
   'FileId', 'Tên file', 'Loại văn bản', 'Mã loại', 'Số/Ký hiệu',
   'Ngày ban hành', 'Trích yếu', 'Nội dung', 'Đường dẫn', 'MimeType',
   'Link Drive', 'Sửa lần cuối', 'Quét lúc', 'OCR',
-  'Đơn vị ban hành', 'Cấp ban hành', 'OCR tiến độ'
+  'Đơn vị ban hành', 'Cấp ban hành', 'OCR tiến độ',
+  'Trạng thái', 'Độ mật', 'Độ khẩn'
 ];
 
 /**
@@ -231,7 +235,10 @@ function rowToObj_(r) {
     ocrStatus: cell_(r[COLS.OCR_STATUS]),
     issuer: cell_(r[COLS.ISSUER]),
     issuerLevel: cell_(r[COLS.ISSUER_LEVEL]),
-    ocrProgress: cell_(r[COLS.OCR_PROGRESS])
+    ocrProgress: cell_(r[COLS.OCR_PROGRESS]),
+    status: cell_(r[COLS.STATUS]),
+    security: cell_(r[COLS.SECURITY]),
+    urgency: cell_(r[COLS.URGENCY])
   };
 }
 
@@ -287,6 +294,9 @@ function docToRow_(d) {
   row[COLS.ISSUER] = d.issuer || '';
   row[COLS.ISSUER_LEVEL] = d.issuerLevel || '';
   row[COLS.OCR_PROGRESS] = d.ocrProgress || '';
+  row[COLS.STATUS] = d.status || '';
+  row[COLS.SECURITY] = d.security || '';
+  row[COLS.URGENCY] = d.urgency || '';
   return row;
 }
 
@@ -347,6 +357,9 @@ function updateDocManual(p) {
   if (p.content != null) cur.content = String(p.content).substring(0, 45000);
   if (p.issuer != null) cur.issuer = String(p.issuer).trim();
   if (p.issuerLevel != null) cur.issuerLevel = String(p.issuerLevel).trim();
+  if (p.status != null) cur.status = String(p.status).trim();
+  if (p.security != null) cur.security = String(p.security).trim();
+  if (p.urgency != null) cur.urgency = String(p.urgency).trim();
 
   cur.ocrStatus = 'manual';
   cur.scannedAt = new Date().toISOString();

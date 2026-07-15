@@ -1,6 +1,6 @@
 /*************************************************************************
  * QLVB-EPU - FILE MÃ NGUỒN GỘP
- * Gồm: Config Storage Classifier Issuer Vision Ocr OcrQueue Scanner Search Duplicate Auth Code
+ * Gồm: Config Storage Classifier Issuer Vision Ocr OcrQueue Scanner Search Duplicate Trash Audit Export Upload Auth Code
  *************************************************************************/
 
 /* ===================== Config.gs ===================== */
@@ -214,6 +214,11 @@ function getDefaultIssuers() {
   ];
 }
 
+/* ===================== TRẠNG THÁI / ĐỘ MẬT / ĐỘ KHẨN ===================== */
+function getStatusOptions() { return ['Mới', 'Đang xử lý', 'Hoàn thành', 'Lưu trữ']; }
+function getSecurityOptions() { return ['Thường', 'Mật', 'Tối mật']; }
+function getUrgencyOptions() { return ['Thường', 'Khẩn', 'Thượng khẩn']; }
+
 function getIssuers() {
   var raw = PropertiesService.getScriptProperties().getProperty(PROP_ISSUERS);
   if (raw) {
@@ -256,14 +261,18 @@ var COLS = {
   OCR_STATUS: 13,    // 'ok' | 'ok-vision' | 'manual' | 'pending' | 'partial' | 'skip' | 'skip-large' | 'error'
   ISSUER: 14,        // Đơn vị ban hành (tên)
   ISSUER_LEVEL: 15,  // Cấp ban hành (Chính phủ, Bộ/Ngành, Trường, Khoa, Phòng/Ban...)
-  OCR_PROGRESS: 16   // Tiến độ OCR dạng 'done/total' (số trang đã OCR / tổng số trang)
+  OCR_PROGRESS: 16,  // Tiến độ OCR dạng 'done/total' (số trang đã OCR / tổng số trang)
+  STATUS: 17,        // Trạng thái xử lý
+  SECURITY: 18,      // Độ mật
+  URGENCY: 19        // Độ khẩn
 };
 
 var DB_HEADERS = [
   'FileId', 'Tên file', 'Loại văn bản', 'Mã loại', 'Số/Ký hiệu',
   'Ngày ban hành', 'Trích yếu', 'Nội dung', 'Đường dẫn', 'MimeType',
   'Link Drive', 'Sửa lần cuối', 'Quét lúc', 'OCR',
-  'Đơn vị ban hành', 'Cấp ban hành', 'OCR tiến độ'
+  'Đơn vị ban hành', 'Cấp ban hành', 'OCR tiến độ',
+  'Trạng thái', 'Độ mật', 'Độ khẩn'
 ];
 
 /**
@@ -466,7 +475,10 @@ function rowToObj_(r) {
     ocrStatus: cell_(r[COLS.OCR_STATUS]),
     issuer: cell_(r[COLS.ISSUER]),
     issuerLevel: cell_(r[COLS.ISSUER_LEVEL]),
-    ocrProgress: cell_(r[COLS.OCR_PROGRESS])
+    ocrProgress: cell_(r[COLS.OCR_PROGRESS]),
+    status: cell_(r[COLS.STATUS]),
+    security: cell_(r[COLS.SECURITY]),
+    urgency: cell_(r[COLS.URGENCY])
   };
 }
 
@@ -522,6 +534,9 @@ function docToRow_(d) {
   row[COLS.ISSUER] = d.issuer || '';
   row[COLS.ISSUER_LEVEL] = d.issuerLevel || '';
   row[COLS.OCR_PROGRESS] = d.ocrProgress || '';
+  row[COLS.STATUS] = d.status || '';
+  row[COLS.SECURITY] = d.security || '';
+  row[COLS.URGENCY] = d.urgency || '';
   return row;
 }
 
@@ -582,6 +597,9 @@ function updateDocManual(p) {
   if (p.content != null) cur.content = String(p.content).substring(0, 45000);
   if (p.issuer != null) cur.issuer = String(p.issuer).trim();
   if (p.issuerLevel != null) cur.issuerLevel = String(p.issuerLevel).trim();
+  if (p.status != null) cur.status = String(p.status).trim();
+  if (p.security != null) cur.security = String(p.security).trim();
+  if (p.urgency != null) cur.urgency = String(p.urgency).trim();
 
   cur.ocrStatus = 'manual';
   cur.scannedAt = new Date().toISOString();
@@ -1506,7 +1524,10 @@ function processFile_(f, existing) {
     ocrStatus: ocrStatus,
     issuer: issuer.name,
     issuerLevel: issuer.level,
-    ocrProgress: ocrProgress
+    ocrProgress: ocrProgress,
+    status: 'Mới',
+    security: 'Thường',
+    urgency: 'Thường'
   };
   var op = upsertDoc_(doc, existing);
   doc._op = op;
@@ -1587,6 +1608,8 @@ function searchDocs(query) {
     if (query.issuerLevel && d.issuerLevel !== query.issuerLevel) return false;
     if (issuerKw && normalizeVi_(d.issuer || '').indexOf(issuerKw) === -1) return false;
     if (numberKw && normalizeVi_(d.docNumber || '').indexOf(numberKw) === -1) return false;
+    if (query.status && d.status !== query.status) return false;
+    if (query.security && d.security !== query.security) return false;
     if (query.fromDate && (!d.issuedDate || d.issuedDate < query.fromDate)) return false;
     if (query.toDate && (!d.issuedDate || d.issuedDate > query.toDate)) return false;
     if (terms.length) {
@@ -1624,6 +1647,9 @@ function searchDocs(query) {
       title: d.title,
       issuer: d.issuer,
       issuerLevel: d.issuerLevel,
+      status: d.status,
+      security: d.security,
+      urgency: d.urgency,
       folderPath: d.folderPath,
       mimeType: d.mimeType,
       fileUrl: d.fileUrl,
@@ -1799,6 +1825,299 @@ function refreshDuplicateCount_() {
 
 function getDuplicateCount_() {
   return parseInt(PropertiesService.getScriptProperties().getProperty(PROP_DUP_COUNT), 10) || 0;
+}
+
+
+/* ===================== Trash.gs ===================== */
+/**
+ * Trash.gs
+ * Thùng rác trong app: xoá văn bản sẽ chuyển sang sheet "ThungRac" (kèm file Drive vào
+ * Thùng rác Drive), có thể khôi phục hoặc xoá vĩnh viễn.
+ */
+
+var TRASH_SHEET = 'ThungRac';
+
+function getTrashSheet_() {
+  var ss = getOrCreateDatabase();
+  var sh = ss.getSheetByName(TRASH_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(TRASH_SHEET);
+    var headers = DB_HEADERS.concat(['Xoá lúc', 'Người xoá']);
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sh.setFrozenRows(1);
+    sh.getRange(1, 1, 1, headers.length).setFontWeight('bold')
+      .setBackground('#8B0000').setFontColor('#ffffff');
+  }
+  return sh;
+}
+
+/**
+ * Xoá văn bản -> đưa vào thùng rác (giữ nguyên bản ghi để khôi phục) + chuyển file Drive vào Thùng rác.
+ */
+function deleteDocToTrash_(fileId, byEmail) {
+  if (!fileId) throw new Error('Thiếu mã văn bản.');
+  var sheet = getDocsSheet_();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) throw new Error('Không có dữ liệu.');
+  var ids = sheet.getRange(2, COLS.FILE_ID + 1, lastRow - 1, 1).getValues();
+  var rowIndex = -1;
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) === String(fileId)) { rowIndex = i + 2; break; }
+  }
+  if (rowIndex === -1) throw new Error('Không tìm thấy văn bản trong danh sách.');
+
+  var rowVals = sheet.getRange(rowIndex, 1, 1, DB_HEADERS.length).getValues()[0];
+  // Ghi vào thùng rác
+  var trash = getTrashSheet_();
+  trash.appendRow(rowVals.concat([new Date(), byEmail || '']));
+  // Xoá khỏi danh sách chính
+  sheet.deleteRow(rowIndex);
+  // Đưa file vào Thùng rác Drive
+  var trashed = false;
+  try { DriveApp.getFileById(fileId).setTrashed(true); trashed = true; } catch (e) {}
+  writeLog_('Xoá vào thùng rác', 1, (rowVals[COLS.FILE_NAME] || fileId));
+  return { ok: true, trashed: trashed };
+}
+
+/**
+ * Danh sách văn bản trong thùng rác.
+ */
+function listTrash_() {
+  var trash = getTrashSheet_();
+  var lastRow = trash.getLastRow();
+  if (lastRow < 2) return [];
+  var w = DB_HEADERS.length + 2;
+  var vals = trash.getRange(2, 1, lastRow - 1, w).getValues();
+  return vals.map(function (r) {
+    var d = rowToObj_(r);
+    d.deletedAt = cell_(r[DB_HEADERS.length]);
+    d.deletedBy = cell_(r[DB_HEADERS.length + 1]);
+    return d;
+  }).reverse(); // mới xoá lên đầu
+}
+
+function findTrashRow_(trash, fileId) {
+  var lastRow = trash.getLastRow();
+  if (lastRow < 2) return -1;
+  var ids = trash.getRange(2, COLS.FILE_ID + 1, lastRow - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) === String(fileId)) return i + 2;
+  }
+  return -1;
+}
+
+/**
+ * Khôi phục 1 văn bản từ thùng rác về danh sách + phục hồi file Drive.
+ */
+function restoreDoc_(fileId) {
+  var trash = getTrashSheet_();
+  var row = findTrashRow_(trash, fileId);
+  if (row === -1) throw new Error('Không tìm thấy trong thùng rác.');
+  var rowVals = trash.getRange(row, 1, 1, DB_HEADERS.length).getValues()[0];
+  // Phục hồi file Drive
+  try { DriveApp.getFileById(fileId).setTrashed(false); } catch (e) {}
+  // Đưa lại vào danh sách chính (nếu chưa có)
+  var sheet = getDocsSheet_();
+  var existing = getExistingIndex_();
+  if (!existing[fileId]) sheet.appendRow(rowVals);
+  trash.deleteRow(row);
+  writeLog_('Khôi phục văn bản', 1, (rowVals[COLS.FILE_NAME] || fileId));
+  return { ok: true };
+}
+
+/**
+ * Xoá vĩnh viễn 1 văn bản khỏi thùng rác (bản ghi). File vẫn ở Thùng rác Drive (Drive tự dọn sau ~30 ngày).
+ */
+function purgeDoc_(fileId) {
+  var trash = getTrashSheet_();
+  var row = findTrashRow_(trash, fileId);
+  if (row === -1) throw new Error('Không tìm thấy trong thùng rác.');
+  trash.deleteRow(row);
+  writeLog_('Xoá vĩnh viễn', 1, fileId);
+  return { ok: true };
+}
+
+function emptyTrash_() {
+  var trash = getTrashSheet_();
+  var lastRow = trash.getLastRow();
+  var count = Math.max(0, lastRow - 1);
+  if (lastRow > 1) trash.deleteRows(2, lastRow - 1);
+  writeLog_('Dọn sạch thùng rác', count, '');
+  return { ok: true, removed: count };
+}
+
+function trashCount_() {
+  try { return Math.max(0, getTrashSheet_().getLastRow() - 1); } catch (e) { return 0; }
+}
+
+
+/* ===================== Audit.gs ===================== */
+/**
+ * Audit.gs
+ * Nhật ký hoạt động: ghi lại thao tác của người dùng (ai, làm gì, khi nào) vào sheet "NhatKyHD".
+ */
+
+var AUDIT_SHEET = 'NhatKyHD';
+var AUDIT_HEADERS = ['Thời điểm', 'Người dùng', 'Hành động', 'Chi tiết'];
+
+// Nhãn tiếng Việt cho các thao tác được ghi log.
+var AUDIT_ACTIONS = {
+  login: 'Đăng nhập',
+  updateDoc: 'Sửa văn bản',
+  deleteDoc: 'Xoá văn bản',
+  restoreDoc: 'Khôi phục văn bản',
+  purgeDoc: 'Xoá vĩnh viễn',
+  emptyTrash: 'Dọn thùng rác',
+  reOcr: 'OCR lại',
+  scan: 'Quét Drive',
+  uploadFile: 'Tải file lên',
+  ocrQueueRun: 'Chạy hàng đợi OCR',
+  setAutoScan: 'Đổi lịch quét',
+  setOcrAuto: 'Đổi lịch OCR',
+  setOcrLimit: 'Đổi hạn mức OCR',
+  saveDocTypes: 'Sửa loại VB',
+  saveIssuers: 'Sửa đơn vị',
+  setVisionKey: 'Đổi Vision key',
+  changePassword: 'Đổi mật khẩu',
+  saveAccount: 'Lưu tài khoản',
+  deleteAccount: 'Xoá tài khoản',
+  resetPassword: 'Đặt lại mật khẩu',
+  initialize: 'Khởi tạo hệ thống'
+};
+
+function getAuditSheet_() {
+  var ss = getOrCreateDatabase();
+  var sh = ss.getSheetByName(AUDIT_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(AUDIT_SHEET);
+    sh.getRange(1, 1, 1, AUDIT_HEADERS.length).setValues([AUDIT_HEADERS]);
+    sh.setFrozenRows(1);
+    sh.getRange(1, 1, 1, AUDIT_HEADERS.length).setFontWeight('bold')
+      .setBackground('#0B5394').setFontColor('#ffffff');
+  }
+  return sh;
+}
+
+function auditLog_(email, method, detail) {
+  try {
+    var action = AUDIT_ACTIONS[method] || method;
+    getAuditSheet_().appendRow([new Date(), email || '', action, detail || '']);
+  } catch (e) { /* không để log làm hỏng luồng chính */ }
+}
+
+// Tạo mô tả ngắn cho log từ payload của phương thức.
+function auditDetail_(method, payload) {
+  payload = payload || {};
+  if (payload.fileId) return 'fileId: ' + payload.fileId;
+  if (payload.email) return payload.email;
+  if (method === 'scan') return payload.force ? 'quét lại toàn bộ' : 'quét thường';
+  return '';
+}
+
+/**
+ * Lấy N dòng nhật ký gần nhất (mới -> cũ).
+ */
+function listAudit_(limit) {
+  limit = limit || 200;
+  var sh = getAuditSheet_();
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+  var n = Math.min(limit, lastRow - 1);
+  var start = lastRow - n + 1;
+  var vals = sh.getRange(start, 1, n, AUDIT_HEADERS.length).getValues();
+  return vals.map(function (r) {
+    return {
+      time: (r[0] instanceof Date) ? r[0].toISOString() : String(r[0]),
+      user: String(r[1] || ''),
+      action: String(r[2] || ''),
+      detail: String(r[3] || '')
+    };
+  }).reverse();
+}
+
+
+/* ===================== Export.gs ===================== */
+/**
+ * Export.gs
+ * Xuất danh mục văn bản ra CSV (mở được bằng Excel) theo đúng bộ lọc đang tìm kiếm.
+ */
+
+function csvCell_(v) {
+  v = (v == null) ? '' : String(v);
+  if (/[",\r\n]/.test(v)) v = '"' + v.replace(/"/g, '""') + '"';
+  return v;
+}
+function csvDate_(iso) {
+  if (!iso) return '';
+  var p = String(iso).substring(0, 10).split('-');
+  return (p.length === 3) ? (p[2] + '/' + p[1] + '/' + p[0]) : String(iso);
+}
+
+/**
+ * Trả về { csv, count, filename } cho danh mục văn bản khớp bộ lọc.
+ */
+function exportDocsCsv_(query) {
+  query = query || {};
+  query.page = 1;
+  query.pageSize = 100000; // lấy tất cả kết quả khớp
+  var res = searchDocs(query);
+
+  var headers = ['STT', 'Số/Ký hiệu', 'Loại văn bản', 'Trích yếu', 'Ngày ban hành',
+    'Đơn vị ban hành', 'Cấp ban hành', 'Trạng thái', 'Độ mật', 'Độ khẩn', 'Tên file', 'Link Drive'];
+  var lines = [headers.map(csvCell_).join(',')];
+  res.items.forEach(function (d, i) {
+    var row = [
+      i + 1, d.docNumber, d.docType, d.title, csvDate_(d.issuedDate),
+      d.issuer, d.issuerLevel, d.status, d.security, d.urgency, d.fileName, d.fileUrl
+    ];
+    lines.push(row.map(csvCell_).join(','));
+  });
+
+  return {
+    csv: lines.join('\r\n'),
+    count: res.items.length,
+    filename: 'DanhMucVanBan_' + Utilities.formatDate(new Date(), 'Asia/Ho_Chi_Minh', 'yyyyMMdd_HHmm') + '.csv'
+  };
+}
+
+
+/* ===================== Upload.gs ===================== */
+/**
+ * Upload.gs
+ * Tải file lên trực tiếp trong app: lưu vào folder gốc trên Drive rồi lập chỉ mục ngay
+ * (ảnh/PDF sẽ được xếp hàng đợi OCR như khi quét).
+ */
+
+function uploadFile_(p, acc) {
+  if (!p || !p.dataBase64 || !p.name) throw new Error('Thiếu dữ liệu file.');
+  var bytes = Utilities.base64Decode(p.dataBase64);
+  var blob = Utilities.newBlob(bytes, p.mimeType || 'application/octet-stream', p.name);
+
+  var folder = getOrCreateRootFolder();
+  var file = folder.createFile(blob);
+
+  var existing = getExistingIndex_();
+  var f = {
+    id: file.getId(),
+    name: file.getName(),
+    mimeType: file.getMimeType(),
+    url: file.getUrl(),
+    modifiedTime: file.getLastUpdated().getTime(),
+    createdDate: file.getDateCreated(),
+    folderPath: '/'
+  };
+  var doc = processFile_(f, existing);
+  refreshDuplicateCount_(); // cập nhật số nghi trùng
+
+  return {
+    ok: true,
+    fileId: doc.fileId,
+    fileName: doc.fileName,
+    docType: doc.docType,
+    docTypeCode: doc.docTypeCode,
+    docNumber: doc.docNumber,
+    ocrStatus: doc.ocrStatus
+  };
 }
 
 
@@ -2180,11 +2499,23 @@ var METHOD_PERM = {
   login: 'PUBLIC',
   getStatus: null, changePassword: null, logout: null,
   search: 'view', getDetail: 'view', getStats: 'view', getUploadInfo: 'view', findDuplicates: 'view',
+  exportCsv: 'view',
   updateDoc: 'edit', reOcr: 'edit', deleteDoc: 'delete',
+  listTrash: 'delete', restoreDoc: 'delete', purgeDoc: 'delete', emptyTrash: 'delete',
   scan: 'scan', ocrQueueRun: 'scan', setOcrAuto: 'scan', setOcrLimit: 'scan', setAutoScan: 'scan',
+  uploadFile: 'scan',
   saveDocTypes: 'config', resetDocTypes: 'config', saveIssuers: 'config', resetIssuers: 'config',
   setVisionKey: 'config', testVision: 'config', initialize: 'config', logoInfo: 'config',
-  listAccounts: 'accounts', saveAccount: 'accounts', deleteAccount: 'accounts', resetPassword: 'accounts'
+  listAccounts: 'accounts', saveAccount: 'accounts', deleteAccount: 'accounts', resetPassword: 'accounts',
+  listAudit: 'accounts'
+};
+
+// Các thao tác cần ghi nhật ký hoạt động.
+var AUDIT_METHODS = {
+  updateDoc: 1, deleteDoc: 1, restoreDoc: 1, purgeDoc: 1, emptyTrash: 1, reOcr: 1, scan: 1,
+  uploadFile: 1, saveDocTypes: 1, saveIssuers: 1, setVisionKey: 1, changePassword: 1,
+  saveAccount: 1, deleteAccount: 1, resetPassword: 1, initialize: 1,
+  setAutoScan: 1, setOcrAuto: 1, setOcrLimit: 1
 };
 
 /**
@@ -2192,7 +2523,11 @@ var METHOD_PERM = {
  */
 function apiDispatch(token, method, payload) {
   payload = payload || {};
-  if (method === 'login') return authLogin_(payload.email, payload.password);
+  if (method === 'login') {
+    var r = authLogin_(payload.email, payload.password);
+    auditLog_(payload.email, 'login', '');
+    return r;
+  }
 
   var acc = authVerify_(token); // ném lỗi AUTH nếu token sai/hết hạn
   if (!METHOD_PERM.hasOwnProperty(method)) throw new Error('Chức năng không hợp lệ.');
@@ -2201,6 +2536,12 @@ function apiDispatch(token, method, payload) {
     throw new Error('Bạn không có quyền thực hiện chức năng này.');
   }
 
+  var result = routeMethod_(method, payload, acc);
+  if (AUDIT_METHODS[method]) auditLog_(acc.email, method, auditDetail_(method, payload));
+  return result;
+}
+
+function routeMethod_(method, payload, acc) {
   switch (method) {
     case 'getStatus':    return apiGetStatus(acc);
     case 'changePassword': return changePassword_(acc, payload.oldPassword, payload.newPassword);
@@ -2212,7 +2553,11 @@ function apiDispatch(token, method, payload) {
     case 'getUploadInfo': return apiGetUploadInfo();
     case 'updateDoc':    return updateDocManual(payload);
     case 'reOcr':        return reOcrDoc(payload.fileId);
-    case 'deleteDoc':    return deleteDocById_(payload.fileId, payload.trashFile);
+    case 'deleteDoc':    return deleteDocToTrash_(payload.fileId, acc.email);
+    case 'listTrash':    return listTrash_();
+    case 'restoreDoc':   return restoreDoc_(payload.fileId);
+    case 'purgeDoc':     return purgeDoc_(payload.fileId);
+    case 'emptyTrash':   return emptyTrash_();
     case 'scan':         return scanDrive({ force: !!payload.force });
     case 'ocrQueueRun':  return apiOcrQueueRun();
     case 'setOcrAuto':   return apiSetOcrAuto(payload.enable, payload.hours);
@@ -2230,6 +2575,9 @@ function apiDispatch(token, method, payload) {
     case 'saveAccount':  return saveAccount_(payload);
     case 'deleteAccount': return deleteAccount_(payload.email, acc.email);
     case 'resetPassword': return adminResetPassword_(payload.email, payload.newPassword);
+    case 'listAudit':    return listAudit_(payload.limit);
+    case 'exportCsv':    return exportDocsCsv_(payload);
+    case 'uploadFile':   return uploadFile_(payload, acc);
     default: throw new Error('Chức năng không hợp lệ.');
   }
 }
@@ -2279,6 +2627,9 @@ function apiGetStatus(acc) {
     docTypes: getDocTypes(),
     issuers: getIssuers(),
     issuerLevels: getIssuerLevels(),
+    statusOptions: getStatusOptions(),
+    securityOptions: getSecurityOptions(),
+    urgencyOptions: getUrgencyOptions(),
     totalDocs: countDocs_(),
     visionEnabled: hasVisionKey_(),
     ocrPending: ocrQueueCount(),
@@ -2286,6 +2637,7 @@ function apiGetStatus(acc) {
     ocrDailyLimit: getOcrDailyLimit(),
     ocrUsedToday: ocrUsedToday_(),
     duplicates: getDuplicateCount_(),
+    trashCount: trashCount_(),
     userEmail: (acc ? acc.email : Session.getActiveUser().getEmail()),
     me: (acc ? publicAccount_(acc) : null)
   };

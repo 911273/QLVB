@@ -169,7 +169,7 @@ function bindTabs() {
       $('#tab-' + tab.dataset.tab).classList.add('active');
       if (tab.dataset.tab === 'list') loadList(1);
       if (tab.dataset.tab === 'overview') loadStats();
-      if (tab.dataset.tab === 'settings') { renderTypesTable(); renderIssuersTable(); renderVisionStatus(); renderAccounts(); }
+      if (tab.dataset.tab === 'settings') { renderTypesTable(); renderIssuersTable(); renderVisionStatus(); renderAccounts(); renderTrashBadge(); }
       if (tab.dataset.tab === 'scan') { loadUploadHint(); renderOcrQueue(); renderDupStatus(); }
     });
   });
@@ -179,18 +179,20 @@ function bindActions() {
   $('#btnInit').addEventListener('click', doInitialize);
   $('#btnSearch').addEventListener('click', function () { doSearch(1); });
   $('#btnSearchClear').addEventListener('click', clearSearch);
+  $('#btnExport').addEventListener('click', doExport);
   $('#sKeyword').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
   $('#sIssuer').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
   $('#sNumber').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
   $('#sFrom').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
   $('#sTo').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
   // Đổi bộ lọc là tự tìm lại ngay.
-  ['sType', 'sLevel', 'sSort', 'sFrom', 'sTo'].forEach(function (id) {
+  ['sType', 'sLevel', 'sStatus', 'sSecurity', 'sSort', 'sFrom', 'sTo'].forEach(function (id) {
     var elx = document.getElementById(id);
     if (elx) elx.addEventListener('change', function () { doSearch(1); });
   });
   $('#btnScan').addEventListener('click', function () { doScan(false); });
   $('#btnScanForce').addEventListener('click', function () { doScan(true); });
+  $('#btnUpload').addEventListener('click', doUpload);
   $('#btnListReload').addEventListener('click', function () { loadList(1); });
   $('#listKeyword').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadList(1); });
   $('#listType').addEventListener('change', function () { loadList(1); });
@@ -212,6 +214,9 @@ function bindActions() {
   $('#btnClearVision').addEventListener('click', clearVision);
   $('#btnChangePassword').addEventListener('click', changeOwnPassword);
   var blc = $('#btnLogoCheck'); if (blc) blc.addEventListener('click', checkLogo);
+  var blt = $('#btnLoadTrash'); if (blt) blt.addEventListener('click', loadTrash);
+  var bet = $('#btnEmptyTrash'); if (bet) bet.addEventListener('click', emptyTrashUi);
+  var bla = $('#btnLoadAudit'); if (bla) bla.addEventListener('click', loadAudit);
   $('#btnAddAccount').addEventListener('click', function () { openAccountEditor(null); });
   $('#modalClose').addEventListener('click', closeModal);
   $('#modal').addEventListener('click', function (e) { if (e.target.id === 'modal') closeModal(); });
@@ -225,6 +230,9 @@ function loadStatus() {
     STATE.docTypes = st.docTypes || [];
     STATE.issuers = st.issuers || [];
     STATE.issuerLevels = st.issuerLevels || [];
+    STATE.statusOptions = st.statusOptions || [];
+    STATE.securityOptions = st.securityOptions || [];
+    STATE.urgencyOptions = st.urgencyOptions || [];
     STATE.me = st.me || STATE.me;
     showApp();
     renderUserBox();
@@ -266,6 +274,8 @@ function applyAcl() {
   toggleEl('#cardTypes', can('config'));
   toggleEl('#cardIssuers', can('config'));
   toggleEl('#cardAccounts', can('accounts'));
+  toggleEl('#cardAudit', can('accounts'));
+  toggleEl('#cardTrash', can('delete'));
   toggleEl('#btnInit', can('config'));
 }
 function setTabVisible(name, on) {
@@ -284,6 +294,9 @@ function doInitialize() {
     STATE.docTypes = st.docTypes || [];
     STATE.issuers = st.issuers || [];
     STATE.issuerLevels = st.issuerLevels || [];
+    STATE.statusOptions = st.statusOptions || [];
+    STATE.securityOptions = st.securityOptions || [];
+    STATE.urgencyOptions = st.urgencyOptions || [];
     $('#initBanner').classList.add('hidden');
     fillTypeSelects();
     fillLevelSelect();
@@ -322,6 +335,13 @@ function fillLevelSelect() {
       return '<option value="' + esc(it.name) + '">';
     }).join('');
   }
+  // Bộ lọc trạng thái & độ mật.
+  var ss = $('#sStatus');
+  if (ss) ss.innerHTML = '<option value="">— Trạng thái —</option>' +
+    (STATE.statusOptions || []).map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('');
+  var sc = $('#sSecurity');
+  if (sc) sc.innerHTML = '<option value="">— Độ mật —</option>' +
+    (STATE.securityOptions || []).map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('');
 }
 
 /* ============ Tổng quan ============ */
@@ -389,6 +409,8 @@ function doSearch(page, silent) {
     issuerLevel: $('#sLevel').value,
     issuer: $('#sIssuer') ? $('#sIssuer').value.trim() : '',
     docNumber: $('#sNumber') ? $('#sNumber').value.trim() : '',
+    status: $('#sStatus') ? $('#sStatus').value : '',
+    security: $('#sSecurity') ? $('#sSecurity').value : '',
     fromDate: dmyToIso($('#sFrom').value),
     toDate: dmyToIso($('#sTo').value),
     sortBy: sort[0], sortDir: sort[1],
@@ -405,12 +427,44 @@ function doSearch(page, silent) {
   }).catch(function (err) { showLoading(false); if (!silent) toast('Lỗi: ' + (err.message || err), 'err'); });
 }
 
+function doExport() {
+  if (!STATE.status || !STATE.status.initialized) { toast('Hãy khởi tạo hệ thống trước.', 'err'); return; }
+  var sort = ($('#sSort').value || 'issuedDate|desc').split('|');
+  var q = {
+    keyword: $('#sKeyword').value.trim(),
+    typeCode: $('#sType').value,
+    issuerLevel: $('#sLevel').value,
+    issuer: $('#sIssuer').value.trim(),
+    docNumber: $('#sNumber').value.trim(),
+    status: $('#sStatus').value,
+    security: $('#sSecurity').value,
+    fromDate: dmyToIso($('#sFrom').value),
+    toDate: dmyToIso($('#sTo').value),
+    sortBy: sort[0], sortDir: sort[1]
+  };
+  showLoading(true, 'Đang tạo file Excel...');
+  call('exportCsv', q).then(function (r) {
+    showLoading(false);
+    if (!r.count) { toast('Không có văn bản để xuất.', 'err'); return; }
+    // Thêm BOM để Excel đọc đúng tiếng Việt (UTF-8).
+    var blob = new Blob(['﻿' + r.csv], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = r.filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    toast('Đã xuất ' + r.count + ' văn bản ra ' + r.filename, 'ok');
+  }).catch(function (err) { showLoading(false); toast('Lỗi xuất: ' + (err.message || err), 'err'); });
+}
+
 function clearSearch() {
   ['sKeyword', 'sIssuer', 'sNumber', 'sFrom', 'sTo'].forEach(function (id) {
     var e = document.getElementById(id); if (e) e.value = '';
   });
   if ($('#sType')) $('#sType').value = '';
   if ($('#sLevel')) $('#sLevel').value = '';
+  if ($('#sStatus')) $('#sStatus').value = '';
+  if ($('#sSecurity')) $('#sSecurity').value = '';
   if ($('#sSort')) $('#sSort').value = 'issuedDate|desc';
   doSearch(1);
 }
@@ -449,6 +503,9 @@ function renderResults(sel, res, keyword) {
         (d.issuer ? '<span>ĐV: <b>' + esc(d.issuer) + '</b>' + (d.issuerLevel ? ' <span class="tag">' + esc(d.issuerLevel) + '</span>' : '') + '</span>' : (d.issuerLevel ? '<span class="tag">' + esc(d.issuerLevel) + '</span>' : '')) +
         '<span>' + esc(d.fileName) + '</span>' +
         '<span class="tag ' + esc(d.ocrStatus) + '">' + ocrLabel(d.ocrStatus) + '</span>' +
+        (d.status ? '<span class="tag st-' + statusClass_(d.status) + '">' + esc(d.status) + '</span>' : '') +
+        (d.security && d.security !== 'Thường' ? '<span class="tag sec">' + esc(d.security) + '</span>' : '') +
+        (d.urgency && d.urgency !== 'Thường' ? '<span class="tag urg">' + esc(d.urgency) + '</span>' : '') +
       '</div>' +
       (d.snippet ? '<div class="doc-snippet">' + highlight(esc(d.snippet), terms) + '</div>' : '');
     var actions = el('div', 'doc-actions');
@@ -461,6 +518,9 @@ function renderResults(sel, res, keyword) {
     item.appendChild(badge); item.appendChild(main); item.appendChild(actions);
     box.appendChild(item);
   });
+}
+function statusClass_(s) {
+  return { 'Mới': 'new', 'Đang xử lý': 'proc', 'Hoàn thành': 'done', 'Lưu trữ': 'arch' }[s] || 'new';
 }
 function ocrLabel(s) {
   if (s === 'ok') return 'Đã trích xuất';
@@ -542,7 +602,9 @@ function openDetail(fileId) {
             (d.docNumber ? chip('Số: ' + d.docNumber) : '') +
             chip('Ngày: ' + fmtDate(d.issuedDate)) +
             (d.issuer ? chip(d.issuer) : '') +
-            (d.issuerLevel ? chip(d.issuerLevel) : '') +
+            (d.status ? chip(d.status) : '') +
+            (d.security && d.security !== 'Thường' ? chip(d.security) : '') +
+            (d.urgency && d.urgency !== 'Thường' ? chip(d.urgency) : '') +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -551,6 +613,9 @@ function openDetail(fileId) {
         row('Số/Ký hiệu', esc(d.docNumber || '—')) +
         row('Đơn vị ban hành', esc(d.issuer || '—')) +
         row('Cấp ban hành', esc(d.issuerLevel || '—')) +
+        row('Trạng thái xử lý', esc(d.status || '—')) +
+        row('Độ mật', esc(d.security || '—')) +
+        row('Độ khẩn', esc(d.urgency || '—')) +
         row('Ngày ban hành', fmtDate(d.issuedDate)) +
         row('Tên file', esc(d.fileName)) +
         row('Đường dẫn', esc(d.folderPath || '/')) +
@@ -579,12 +644,12 @@ function openDetail(fileId) {
 }
 
 function deleteDocUi(d) {
-  openConfirm_('Xoá văn bản "' + (d.title || d.fileName) + '"?\n\nFile trên Drive sẽ được chuyển vào Thùng rác (khôi phục được), và văn bản sẽ bị gỡ khỏi danh sách.', function () {
+  openConfirm_('Xoá văn bản "' + (d.title || d.fileName) + '"?\n\nVăn bản sẽ được chuyển vào Thùng rác của app (khôi phục được trong Cài đặt → Thùng rác).', function () {
     showLoading(true, 'Đang xoá...');
-    call('deleteDoc', { fileId: d.fileId, trashFile: true }).then(function () {
+    call('deleteDoc', { fileId: d.fileId }).then(function () {
       showLoading(false);
       closeModal();
-      toast('Đã xoá văn bản (đưa vào Thùng rác Drive).', 'ok');
+      toast('Đã chuyển vào Thùng rác.', 'ok');
       refreshResults();
       loadStats();
       loadStatus();
@@ -593,6 +658,11 @@ function deleteDocUi(d) {
 }
 
 /* ============ Sửa thông tin bằng tay ============ */
+function optList_(options, sel) {
+  return '<option value="">— —</option>' + (options || []).map(function (x) {
+    return '<option value="' + esc(x) + '"' + (x === sel ? ' selected' : '') + '>' + esc(x) + '</option>';
+  }).join('');
+}
 function openEditForm(d) {
   var typeOpts = (STATE.docTypes || []).map(function (t) {
     return '<option value="' + esc(t.code) + '"' + (t.code === d.docTypeCode ? ' selected' : '') + '>' + esc(t.name) + '</option>';
@@ -612,6 +682,9 @@ function openEditForm(d) {
       '<label>Số/Ký hiệu<input id="edNumber" class="input" value="' + esc(d.docNumber || '') + '" placeholder="VD: 510/QĐ-ĐHĐL"></label>' +
       '<label>Đơn vị ban hành<input id="edIssuer" class="input" list="issuerList" value="' + esc(d.issuer || '') + '" placeholder="VD: Trường Đại học Điện lực"></label>' +
       '<label>Cấp ban hành<select id="edLevel" class="input">' + levelOpts + '</select></label>' +
+      '<label>Trạng thái xử lý<select id="edStatus" class="input">' + optList_(STATE.statusOptions, d.status) + '</select></label>' +
+      '<label>Độ mật<select id="edSecurity" class="input">' + optList_(STATE.securityOptions, d.security) + '</select></label>' +
+      '<label>Độ khẩn<select id="edUrgency" class="input">' + optList_(STATE.urgencyOptions, d.urgency) + '</select></label>' +
       '<label>Ngày ban hành<span class="date-field">' +
         '<input id="edDate" type="text" class="input date-text" placeholder="dd/mm/yyyy" inputmode="numeric" maxlength="10" value="' + esc(isoToDmy(d.issuedDate)) + '">' +
         '<span class="date-btn">📅<input type="date" class="date-native" tabindex="-1"></span>' +
@@ -663,6 +736,9 @@ function saveEdit(fileId) {
     docNumber: $('#edNumber').value.trim(),
     issuer: $('#edIssuer').value.trim(),
     issuerLevel: $('#edLevel').value,
+    status: $('#edStatus').value,
+    security: $('#edSecurity').value,
+    urgency: $('#edUrgency').value,
     issuedDate: $('#edDate').value,
     title: $('#edTitle').value.trim(),
     content: $('#edContent').value
@@ -791,9 +867,9 @@ function renderDupGroups(res) {
   });
   $all('[data-dup-del]', box).forEach(function (b) {
     b.addEventListener('click', function () {
-      openConfirm_('Xoá văn bản "' + b.getAttribute('data-name') + '"?\n\nFile sẽ vào Thùng rác Drive và gỡ khỏi danh sách.', function () {
+      openConfirm_('Xoá văn bản "' + b.getAttribute('data-name') + '"?\n\nVăn bản sẽ vào Thùng rác của app (khôi phục được).', function () {
         showLoading(true, 'Đang xoá...');
-        call('deleteDoc', { fileId: b.getAttribute('data-dup-del'), trashFile: true }).then(function () {
+        call('deleteDoc', { fileId: b.getAttribute('data-dup-del') }).then(function () {
           showLoading(false);
           toast('Đã xoá. Đang rà soát lại...', 'ok');
           doFindDuplicates();
@@ -802,6 +878,50 @@ function renderDupGroups(res) {
       });
     });
   });
+}
+
+/* ============ Tải file lên ============ */
+function doUpload() {
+  var input = $('#uploadInput');
+  var files = input.files;
+  if (!files || !files.length) { toast('Hãy chọn file trước.', 'err'); return; }
+  var MAX = 25 * 1024 * 1024;
+  var list = Array.prototype.slice.call(files);
+  var big = list.filter(function (f) { return f.size > MAX; });
+  if (big.length) { toast('Có file > 25MB (' + big[0].name + '). Hãy tách nhỏ trước khi tải.', 'err'); return; }
+
+  var box = $('#uploadResult');
+  var done = 0, ok = 0, err = 0;
+  box.innerHTML = 'Đang tải lên 0/' + list.length + '...';
+  showLoading(true, 'Đang tải lên...');
+
+  function next(i) {
+    if (i >= list.length) {
+      showLoading(false);
+      box.innerHTML = 'Hoàn tất: <b>' + ok + '</b> thành công' + (err ? ', <b>' + err + '</b> lỗi' : '') + '. Ảnh/PDF đã được xếp hàng đợi OCR.';
+      toast('Đã tải lên ' + ok + ' file.', 'ok');
+      input.value = '';
+      loadStatus();
+      refreshResults();
+      return;
+    }
+    var f = list[i];
+    var reader = new FileReader();
+    reader.onload = function () {
+      var b64 = String(reader.result).split(',')[1] || '';
+      call('uploadFile', { name: f.name, mimeType: f.type || 'application/octet-stream', dataBase64: b64 })
+        .then(function () { ok++; })
+        .catch(function () { err++; })
+        .then(function () {
+          done++;
+          box.innerHTML = 'Đang tải lên ' + done + '/' + list.length + '...';
+          next(i + 1);
+        });
+    };
+    reader.onerror = function () { err++; done++; next(i + 1); };
+    reader.readAsDataURL(f);
+  }
+  next(0);
 }
 
 /* ============ Hàng đợi OCR ============ */
@@ -999,6 +1119,75 @@ function resetIssuers() {
     showLoading(false);
     toast('Đã khôi phục danh mục mặc định.', 'ok');
   }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+/* ============ Nhật ký hoạt động ============ */
+function loadAudit() {
+  showLoading(true, 'Đang tải nhật ký...');
+  call('listAudit', { limit: 200 }).then(function (list) {
+    showLoading(false);
+    var t = $('#auditList');
+    var rows = '<tr><th style="width:150px">Thời điểm</th><th style="width:180px">Người dùng</th><th style="width:140px">Hành động</th><th>Chi tiết</th></tr>';
+    if (!list.length) { t.innerHTML = rows + '<tr><td colspan="4" class="muted">Chưa có nhật ký.</td></tr>'; return; }
+    list.forEach(function (a) {
+      rows += '<tr><td>' + esc(fmtDateTime(a.time)) + '</td><td>' + esc(a.user) + '</td><td>' + esc(a.action) + '</td><td class="muted">' + esc(a.detail) + '</td></tr>';
+    });
+    t.innerHTML = rows;
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+/* ============ Thùng rác ============ */
+function renderTrashBadge() {
+  var b = $('#trashCountBadge');
+  if (b) { var n = (STATE.status && STATE.status.trashCount) || 0; b.innerHTML = n ? '<span class="tag error">' + n + '</span>' : ''; }
+}
+function loadTrash() {
+  showLoading(true, 'Đang tải thùng rác...');
+  call('listTrash').then(function (list) {
+    showLoading(false);
+    var box = $('#trashList');
+    if (!list.length) { box.innerHTML = '<div class="empty" style="padding:20px 0">Thùng rác trống.</div>'; return; }
+    var html = '';
+    list.forEach(function (d) {
+      html += '<div class="dup-item">' +
+        '<div class="dup-info"><b>' + esc(d.title || d.fileName) + '</b>' +
+          '<div class="muted" style="font-size:12px">' +
+            (d.docNumber ? 'Số: ' + esc(d.docNumber) + ' • ' : '') +
+            'Xoá lúc: ' + fmtDateTime(d.deletedAt) + (d.deletedBy ? ' bởi ' + esc(d.deletedBy) : '') +
+          '</div></div>' +
+        '<div class="dup-actions">' +
+          '<button class="btn" data-restore="' + esc(d.fileId) + '">Khôi phục</button>' +
+          '<button class="btn btn-danger" data-purge="' + esc(d.fileId) + '">Xoá vĩnh viễn</button>' +
+        '</div></div>';
+    });
+    box.innerHTML = html;
+    $all('[data-restore]', box).forEach(function (b) {
+      b.addEventListener('click', function () {
+        showLoading(true, 'Đang khôi phục...');
+        call('restoreDoc', { fileId: b.getAttribute('data-restore') }).then(function () {
+          showLoading(false); toast('Đã khôi phục.', 'ok'); loadTrash(); loadStatus();
+        }).catch(function (e) { showLoading(false); toast('Lỗi: ' + (e.message || e), 'err'); });
+      });
+    });
+    $all('[data-purge]', box).forEach(function (b) {
+      b.addEventListener('click', function () {
+        openConfirm_('Xoá vĩnh viễn bản ghi này khỏi thùng rác?', function () {
+          showLoading(true, 'Đang xoá...');
+          call('purgeDoc', { fileId: b.getAttribute('data-purge') }).then(function () {
+            showLoading(false); toast('Đã xoá vĩnh viễn.', 'ok'); loadTrash(); loadStatus();
+          }).catch(function (e) { showLoading(false); toast('Lỗi: ' + (e.message || e), 'err'); });
+        });
+      });
+    });
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+function emptyTrashUi() {
+  openConfirm_('Dọn sạch toàn bộ thùng rác? Các bản ghi sẽ bị xoá vĩnh viễn (file gốc vẫn ở Thùng rác Drive).', function () {
+    showLoading(true, 'Đang dọn...');
+    call('emptyTrash').then(function (r) {
+      showLoading(false); toast('Đã dọn ' + r.removed + ' mục.', 'ok'); loadTrash(); loadStatus();
+    }).catch(function (e) { showLoading(false); toast('Lỗi: ' + (e.message || e), 'err'); });
+  });
 }
 
 /* ============ Kiểm tra logo ============ */

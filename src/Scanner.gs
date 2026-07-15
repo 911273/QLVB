@@ -155,7 +155,10 @@ function processFile_(f, existing) {
     ocrStatus: ocrStatus,
     issuer: issuer.name,
     issuerLevel: issuer.level,
-    ocrProgress: ocrProgress
+    ocrProgress: ocrProgress,
+    status: 'Mới',
+    security: 'Thường',
+    urgency: 'Thường'
   };
   var op = upsertDoc_(doc, existing);
   doc._op = op;

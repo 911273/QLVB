@@ -124,6 +124,7 @@
             <input type="text" id="sKeyword" class="input grow" placeholder="Nhập từ khoá (tên, số hiệu, trích yếu, nội dung, đơn vị...)">
             <button class="btn btn-primary" id="btnSearch">Tìm kiếm</button>
             <button class="btn" id="btnSearchClear">Xoá lọc</button>
+            <button class="btn" id="btnExport" title="Xuất danh mục theo bộ lọc ra Excel/CSV">⭳ Xuất Excel</button>
           </div>
           <div class="form-row">
             <label>Loại văn bản
@@ -137,6 +138,12 @@
             </label>
             <label>Số/Ký hiệu
               <input type="text" id="sNumber" class="input" placeholder="VD: 510/QĐ">
+            </label>
+            <label>Trạng thái
+              <select id="sStatus" class="input"></select>
+            </label>
+            <label>Độ mật
+              <select id="sSecurity" class="input"></select>
             </label>
           </div>
           <div class="form-row">
@@ -181,6 +188,14 @@
             <button class="btn" id="btnScanForce">Quét lại toàn bộ (OCR lại)</button>
           </div>
           <div id="scanResult" class="scan-result"></div>
+          <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+          <h4 style="margin:0 0 8px;color:var(--primary-dark)">Tải văn bản lên trực tiếp</h4>
+          <p class="muted">Chọn file (PDF, ảnh, Word...) để tải thẳng vào folder gốc và lập chỉ mục ngay, không cần lên Drive thủ công.</p>
+          <div class="form-row">
+            <input type="file" id="uploadInput" class="input" multiple accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.gif,.doc,.docx">
+            <button class="btn btn-primary" id="btnUpload">Tải lên &amp; lập chỉ mục</button>
+          </div>
+          <div id="uploadResult" class="scan-result"></div>
         </div>
         <div class="card">
           <h3>Tự động quét định kỳ</h3>
@@ -264,6 +279,21 @@
             <button class="btn btn-primary" id="btnAddAccount">+ Thêm tài khoản</button>
           </div>
           <div style="overflow-x:auto"><table class="types-table" id="accountsList"></table></div>
+        </div>
+        <div class="card hidden" id="cardAudit">
+          <h3>Nhật ký hoạt động</h3>
+          <p class="muted">Lịch sử thao tác: ai đăng nhập, sửa, xoá, tải lên... (200 dòng gần nhất).</p>
+          <div class="form-row"><button class="btn" id="btnLoadAudit">Xem nhật ký</button></div>
+          <div style="overflow-x:auto"><table class="types-table" id="auditList"></table></div>
+        </div>
+        <div class="card hidden" id="cardTrash">
+          <h3>Thùng rác <span id="trashCountBadge"></span></h3>
+          <p class="muted">Văn bản đã xoá được giữ ở đây để khôi phục. Xoá vĩnh viễn sẽ gỡ bản ghi (file gốc vẫn nằm trong Thùng rác Drive ~30 ngày).</p>
+          <div class="form-row">
+            <button class="btn" id="btnLoadTrash">Tải danh sách</button>
+            <button class="btn btn-danger" id="btnEmptyTrash">Dọn sạch thùng rác</button>
+          </div>
+          <div id="trashList"></div>
         </div>
         <div class="card hidden" id="cardVision">
           <h3>OCR nâng cao (Google Cloud Vision) — chất lượng tiếng Việt cao</h3>
