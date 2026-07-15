@@ -52,7 +52,7 @@ var METHOD_PERM = {
   login: 'PUBLIC',
   getStatus: null, changePassword: null, logout: null,
   search: 'view', getDetail: 'view', getStats: 'view', getUploadInfo: 'view',
-  updateDoc: 'edit', reOcr: 'edit',
+  updateDoc: 'edit', reOcr: 'edit', deleteDoc: 'delete',
   scan: 'scan', ocrQueueRun: 'scan', setOcrAuto: 'scan', setOcrLimit: 'scan', setAutoScan: 'scan',
   saveDocTypes: 'config', resetDocTypes: 'config', saveIssuers: 'config', resetIssuers: 'config',
   setVisionKey: 'config', testVision: 'config', initialize: 'config',
@@ -83,6 +83,7 @@ function apiDispatch(token, method, payload) {
     case 'getUploadInfo': return apiGetUploadInfo();
     case 'updateDoc':    return updateDocManual(payload);
     case 'reOcr':        return reOcrDoc(payload.fileId);
+    case 'deleteDoc':    return deleteDocById_(payload.fileId, payload.trashFile);
     case 'scan':         return scanDrive({ force: !!payload.force });
     case 'ocrQueueRun':  return apiOcrQueueRun();
     case 'setOcrAuto':   return apiSetOcrAuto(payload.enable, payload.hours);

@@ -1,6 +1,5 @@
 /*************************************************************************
  * QLVB-EPU - FILE MÃ NGUỒN GỘP (dán toàn bộ vào 1 file Code.gs)
- * Hệ thống Quản lý Văn bản - Trường Đại học Điện lực
  * Gồm: Config Storage Classifier Issuer Vision Ocr OcrQueue Scanner Search Auth Code
  *************************************************************************/
 
@@ -561,6 +560,29 @@ function updateDocManual(p) {
   upsertDoc_(cur, existing);
   writeLog_('Sửa tay', 1, cur.fileName);
   return cur;
+}
+
+/**
+ * Xoá 1 văn bản khỏi hệ thống: gỡ dòng trong CSDL, và (mặc định) chuyển file
+ * trên Drive vào thùng rác để lần quét sau không thêm lại. File vẫn khôi phục được từ Thùng rác Drive.
+ */
+function deleteDocById_(fileId, trashFile) {
+  if (!fileId) throw new Error('Thiếu mã văn bản.');
+  var sheet = getDocsSheet_();
+  var existing = getExistingIndex_();
+  var hit = existing[fileId];
+  var name = fileId;
+  try { name = DriveApp.getFileById(fileId).getName(); } catch (e) {}
+
+  var removed = false;
+  if (hit) { sheet.deleteRow(hit.rowIndex); removed = true; }
+
+  var trashed = false;
+  if (trashFile !== false) {
+    try { DriveApp.getFileById(fileId).setTrashed(true); trashed = true; } catch (e) {}
+  }
+  writeLog_('Xoá văn bản', 1, name + (trashed ? ' (đã đưa vào thùng rác Drive)' : ' (chỉ gỡ khỏi danh sách)'));
+  return { ok: true, removed: removed, trashed: trashed };
 }
 
 // Chuẩn hoá ngày nhập tay về 'yyyy-MM-dd' (chấp nhận rỗng).
@@ -1644,19 +1666,20 @@ var DEFAULT_ADMIN_EMAIL = 'vupq@epu.edu.vn';
 var DEFAULT_ADMIN_PASSWORD = '123456';
 
 // Các quyền chức năng.
-var PERM_KEYS = ['view', 'edit', 'scan', 'config', 'accounts'];
+var PERM_KEYS = ['view', 'edit', 'delete', 'scan', 'config', 'accounts'];
 var PERM_LABELS = {
   view: 'Xem & tìm kiếm',
   edit: 'Sửa thông tin văn bản',
+  delete: 'Xoá văn bản',
   scan: 'Quét & OCR',
   config: 'Cấu hình (loại VB, đơn vị, OCR...)',
   accounts: 'Quản lý tài khoản'
 };
 
 function rolePerms_(role) {
-  if (role === 'admin') return { view: true, edit: true, scan: true, config: true, accounts: true };
-  if (role === 'editor') return { view: true, edit: true, scan: true, config: false, accounts: false };
-  return { view: true, edit: false, scan: false, config: false, accounts: false }; // viewer
+  if (role === 'admin') return { view: true, edit: true, delete: true, scan: true, config: true, accounts: true };
+  if (role === 'editor') return { view: true, edit: true, delete: false, scan: true, config: false, accounts: false };
+  return { view: true, edit: false, delete: false, scan: false, config: false, accounts: false }; // viewer
 }
 
 function normalizePerms_(role, perms) {
@@ -1956,7 +1979,7 @@ var METHOD_PERM = {
   login: 'PUBLIC',
   getStatus: null, changePassword: null, logout: null,
   search: 'view', getDetail: 'view', getStats: 'view', getUploadInfo: 'view',
-  updateDoc: 'edit', reOcr: 'edit',
+  updateDoc: 'edit', reOcr: 'edit', deleteDoc: 'delete',
   scan: 'scan', ocrQueueRun: 'scan', setOcrAuto: 'scan', setOcrLimit: 'scan', setAutoScan: 'scan',
   saveDocTypes: 'config', resetDocTypes: 'config', saveIssuers: 'config', resetIssuers: 'config',
   setVisionKey: 'config', testVision: 'config', initialize: 'config',
@@ -1987,6 +2010,7 @@ function apiDispatch(token, method, payload) {
     case 'getUploadInfo': return apiGetUploadInfo();
     case 'updateDoc':    return updateDocManual(payload);
     case 'reOcr':        return reOcrDoc(payload.fileId);
+    case 'deleteDoc':    return deleteDocById_(payload.fileId, payload.trashFile);
     case 'scan':         return scanDrive({ force: !!payload.force });
     case 'ocrQueueRun':  return apiOcrQueueRun();
     case 'setOcrAuto':   return apiSetOcrAuto(payload.enable, payload.hours);

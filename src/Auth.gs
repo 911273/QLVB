@@ -18,19 +18,20 @@ var DEFAULT_ADMIN_EMAIL = 'vupq@epu.edu.vn';
 var DEFAULT_ADMIN_PASSWORD = '123456';
 
 // Các quyền chức năng.
-var PERM_KEYS = ['view', 'edit', 'scan', 'config', 'accounts'];
+var PERM_KEYS = ['view', 'edit', 'delete', 'scan', 'config', 'accounts'];
 var PERM_LABELS = {
   view: 'Xem & tìm kiếm',
   edit: 'Sửa thông tin văn bản',
+  delete: 'Xoá văn bản',
   scan: 'Quét & OCR',
   config: 'Cấu hình (loại VB, đơn vị, OCR...)',
   accounts: 'Quản lý tài khoản'
 };
 
 function rolePerms_(role) {
-  if (role === 'admin') return { view: true, edit: true, scan: true, config: true, accounts: true };
-  if (role === 'editor') return { view: true, edit: true, scan: true, config: false, accounts: false };
-  return { view: true, edit: false, scan: false, config: false, accounts: false }; // viewer
+  if (role === 'admin') return { view: true, edit: true, delete: true, scan: true, config: true, accounts: true };
+  if (role === 'editor') return { view: true, edit: true, delete: false, scan: true, config: false, accounts: false };
+  return { view: true, edit: false, delete: false, scan: false, config: false, accounts: false }; // viewer
 }
 
 function normalizePerms_(role, perms) {

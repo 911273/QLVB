@@ -493,6 +493,7 @@ function openDetail(fileId) {
         '<a class="btn btn-primary" href="' + esc(d.fileUrl) + '" target="_blank">Mở trên Drive</a>' +
         (can('edit') ? '<button class="btn" id="btnEditDoc">✎ Sửa thông tin</button>' : '') +
         (can('scan') ? '<button class="btn" id="btnReOcr">OCR lại</button>' : '') +
+        (can('delete') ? '<button class="btn btn-danger" id="btnDeleteDoc">🗑 Xoá văn bản</button>' : '') +
       '</div>' +
       previewBlock_(d) +
       '<h3 style="margin-top:16px">Nội dung trích xuất' + (d.ocrProgress ? ' <span class="muted" style="font-weight:normal">(đã OCR ' + esc(d.ocrProgress) + ' trang)</span>' : '') + '</h3>' +
@@ -504,7 +505,23 @@ function openDetail(fileId) {
     if (btn) btn.addEventListener('click', function () { doReOcr(d.fileId); });
     var btnE = $('#btnEditDoc');
     if (btnE) btnE.addEventListener('click', function () { openEditForm(d); });
+    var btnD = $('#btnDeleteDoc');
+    if (btnD) btnD.addEventListener('click', function () { deleteDocUi(d); });
   }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+function deleteDocUi(d) {
+  openConfirm_('Xoá văn bản "' + (d.title || d.fileName) + '"?\n\nFile trên Drive sẽ được chuyển vào Thùng rác (khôi phục được), và văn bản sẽ bị gỡ khỏi danh sách.', function () {
+    showLoading(true, 'Đang xoá...');
+    call('deleteDoc', { fileId: d.fileId, trashFile: true }).then(function () {
+      showLoading(false);
+      closeModal();
+      toast('Đã xoá văn bản (đưa vào Thùng rác Drive).', 'ok');
+      refreshResults();
+      loadStats();
+      loadStatus();
+    }).catch(function (err) { showLoading(false); toast('Lỗi xoá: ' + (err.message || err), 'err'); });
+  });
 }
 
 /* ============ Sửa thông tin bằng tay ============ */
@@ -900,8 +917,8 @@ function roleLabel_(r) { return r === 'admin' ? 'Quản trị viên' : (r === 'e
 function openAccountEditor(acc) {
   var isNew = !acc;
   acc = acc || { email: '', name: '', role: 'viewer', active: true, perms: { view: true } };
-  var permBoxes = ['view', 'edit', 'scan', 'config', 'accounts'].map(function (k) {
-    var label = { view: 'Xem & tìm kiếm', edit: 'Sửa văn bản', scan: 'Quét & OCR', config: 'Cấu hình', accounts: 'Quản lý tài khoản' }[k];
+  var permBoxes = ['view', 'edit', 'delete', 'scan', 'config', 'accounts'].map(function (k) {
+    var label = { view: 'Xem & tìm kiếm', edit: 'Sửa văn bản', delete: 'Xoá văn bản', scan: 'Quét & OCR', config: 'Cấu hình', accounts: 'Quản lý tài khoản' }[k];
     return '<label class="perm-check"><input type="checkbox" data-perm="' + k + '"' + (acc.perms && acc.perms[k] ? ' checked' : '') + '> ' + label + '</label>';
   }).join('');
   var roleOpts = ['viewer', 'editor', 'admin'].map(function (r) {
@@ -926,7 +943,7 @@ function openAccountEditor(acc) {
   $('#modal').classList.remove('hidden');
   // Chọn vai trò -> tự tick quyền mặc định.
   $('#acRole').addEventListener('change', function () {
-    var preset = { viewer: ['view'], editor: ['view', 'edit', 'scan'], admin: ['view', 'edit', 'scan', 'config', 'accounts'] }[this.value] || ['view'];
+    var preset = { viewer: ['view'], editor: ['view', 'edit', 'scan'], admin: ['view', 'edit', 'delete', 'scan', 'config', 'accounts'] }[this.value] || ['view'];
     $all('[data-perm]').forEach(function (cb) { cb.checked = preset.indexOf(cb.getAttribute('data-perm')) !== -1; });
   });
   $('#btnCancelAccount').addEventListener('click', closeModal);
@@ -962,7 +979,7 @@ function deleteAccountUi(email) {
   });
 }
 function openConfirm_(msg, onYes) {
-  var html = '<h2>Xác nhận</h2><p>' + esc(msg) + '</p>' +
+  var html = '<h2>Xác nhận</h2><p style="white-space:pre-line">' + esc(msg) + '</p>' +
     '<div class="form-row"><button class="btn btn-primary" id="cfYes">Đồng ý</button><button class="btn" id="cfNo">Huỷ</button></div>';
   $('#modalContent').innerHTML = html;
   setModalWide_(false);

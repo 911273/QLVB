@@ -328,6 +328,29 @@ function updateDocManual(p) {
   return cur;
 }
 
+/**
+ * Xoá 1 văn bản khỏi hệ thống: gỡ dòng trong CSDL, và (mặc định) chuyển file
+ * trên Drive vào thùng rác để lần quét sau không thêm lại. File vẫn khôi phục được từ Thùng rác Drive.
+ */
+function deleteDocById_(fileId, trashFile) {
+  if (!fileId) throw new Error('Thiếu mã văn bản.');
+  var sheet = getDocsSheet_();
+  var existing = getExistingIndex_();
+  var hit = existing[fileId];
+  var name = fileId;
+  try { name = DriveApp.getFileById(fileId).getName(); } catch (e) {}
+
+  var removed = false;
+  if (hit) { sheet.deleteRow(hit.rowIndex); removed = true; }
+
+  var trashed = false;
+  if (trashFile !== false) {
+    try { DriveApp.getFileById(fileId).setTrashed(true); trashed = true; } catch (e) {}
+  }
+  writeLog_('Xoá văn bản', 1, name + (trashed ? ' (đã đưa vào thùng rác Drive)' : ' (chỉ gỡ khỏi danh sách)'));
+  return { ok: true, removed: removed, trashed: trashed };
+}
+
 // Chuẩn hoá ngày nhập tay về 'yyyy-MM-dd' (chấp nhận rỗng).
 function normalizeDateInput_(v) {
   if (!v) return '';
