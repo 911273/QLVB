@@ -1,0 +1,448 @@
+<script>
+/* ============ Tiện ích gọi server (Promise hoá google.script.run) ============ */
+function call(fn, arg) {
+  return new Promise(function (resolve, reject) {
+    google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(function (err) { reject(err); })
+      [fn](arg);
+  });
+}
+
+var TYPE_ICONS = {}; // code -> short label
+var STATE = { status: null, docTypes: [] };
+
+/* ============ Tiện ích UI ============ */
+function $(sel, root) { return (root || document).querySelector(sel); }
+function $all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+function el(tag, cls, html) {
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html != null) e.innerHTML = html;
+  return e;
+}
+function esc(s) {
+  return (s == null ? '' : String(s))
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+function showLoading(show, text) {
+  var l = $('#loading');
+  $('#loadingText').textContent = text || 'Đang xử lý...';
+  l.classList.toggle('hidden', !show);
+}
+var toastTimer;
+function toast(msg, type) {
+  var t = $('#toast');
+  t.textContent = msg;
+  t.className = 'toast ' + (type || '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { t.classList.add('hidden'); }, 3200);
+}
+function fmtDate(iso) {
+  if (!iso) return '—';
+  var p = String(iso).split('-');
+  if (p.length === 3) return p[2] + '/' + p[1] + '/' + p[0];
+  return iso;
+}
+function fmtDateTime(iso) {
+  if (!iso) return 'Chưa quét';
+  try { return new Date(iso).toLocaleString('vi-VN'); } catch (e) { return iso; }
+}
+
+/* ============ Khởi động ============ */
+document.addEventListener('DOMContentLoaded', function () {
+  bindTabs();
+  bindActions();
+  loadStatus();
+});
+
+function bindTabs() {
+  $all('.tab').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      $all('.tab').forEach(function (t) { t.classList.remove('active'); });
+      $all('.tab-panel').forEach(function (p) { p.classList.remove('active'); });
+      tab.classList.add('active');
+      $('#tab-' + tab.dataset.tab).classList.add('active');
+      if (tab.dataset.tab === 'list') loadList(1);
+      if (tab.dataset.tab === 'overview') loadStats();
+      if (tab.dataset.tab === 'settings') renderTypesTable();
+      if (tab.dataset.tab === 'scan') loadUploadHint();
+    });
+  });
+}
+
+function bindActions() {
+  $('#btnInit').addEventListener('click', doInitialize);
+  $('#btnSearch').addEventListener('click', function () { doSearch(1); });
+  $('#sKeyword').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
+  $('#btnScan').addEventListener('click', function () { doScan(false); });
+  $('#btnScanForce').addEventListener('click', function () { doScan(true); });
+  $('#btnListReload').addEventListener('click', function () { loadList(1); });
+  $('#listKeyword').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadList(1); });
+  $('#listType').addEventListener('change', function () { loadList(1); });
+  $('#btnAutoOn').addEventListener('click', function () { setAutoScan(true); });
+  $('#btnAutoOff').addEventListener('click', function () { setAutoScan(false); });
+  $('#btnAddType').addEventListener('click', addTypeRow);
+  $('#btnSaveTypes').addEventListener('click', saveTypes);
+  $('#btnResetTypes').addEventListener('click', resetTypes);
+  $('#modalClose').addEventListener('click', closeModal);
+  $('#modal').addEventListener('click', function (e) { if (e.target.id === 'modal') closeModal(); });
+}
+
+/* ============ Trạng thái hệ thống ============ */
+function loadStatus() {
+  showLoading(true, 'Đang tải hệ thống...');
+  call('apiGetStatus').then(function (st) {
+    STATE.status = st;
+    STATE.docTypes = st.docTypes || [];
+    $('#userBox').innerHTML = 'Đăng nhập: <b>' + esc(st.userEmail || '') + '</b>';
+    $('#initBanner').classList.toggle('hidden', st.initialized);
+    fillTypeSelects();
+    renderSysInfo();
+    renderStatCardsFromStatus();
+    loadStats();
+    showLoading(false);
+  }).catch(function (err) {
+    showLoading(false);
+    toast('Lỗi tải trạng thái: ' + (err.message || err), 'err');
+  });
+}
+
+function doInitialize() {
+  showLoading(true, 'Đang khởi tạo folder và cơ sở dữ liệu...');
+  call('apiInitialize').then(function (st) {
+    STATE.status = st;
+    STATE.docTypes = st.docTypes || [];
+    $('#initBanner').classList.add('hidden');
+    fillTypeSelects();
+    renderSysInfo();
+    showLoading(false);
+    toast('Đã khởi tạo hệ thống thành công!', 'ok');
+    loadUploadHint();
+  }).catch(function (err) {
+    showLoading(false);
+    toast('Lỗi khởi tạo: ' + (err.message || err), 'err');
+  });
+}
+
+function fillTypeSelects() {
+  var opts = '<option value="">— Tất cả loại —</option>';
+  STATE.docTypes.forEach(function (t) {
+    opts += '<option value="' + esc(t.code) + '">' + esc(t.name) + '</option>';
+  });
+  $('#sType').innerHTML = opts;
+  $('#listType').innerHTML = opts;
+}
+
+/* ============ Tổng quan ============ */
+function renderStatCardsFromStatus() {
+  var st = STATE.status || {};
+  $('#statCards').innerHTML =
+    statCard(st.totalDocs || 0, 'Tổng số văn bản') +
+    statCard((st.docTypes || []).length, 'Loại văn bản') +
+    statCard(st.autoScan ? 'Bật' : 'Tắt', 'Tự động quét') +
+    statCardText(fmtDateTime(st.lastScan), 'Quét gần nhất');
+}
+function statCard(num, lbl) {
+  return '<div class="stat-card"><div class="num">' + esc(num) + '</div><div class="lbl">' + esc(lbl) + '</div></div>';
+}
+function statCardText(text, lbl) {
+  return '<div class="stat-card"><div class="num" style="font-size:15px;padding-top:8px">' + esc(text) + '</div><div class="lbl">' + esc(lbl) + '</div></div>';
+}
+
+function loadStats() {
+  call('apiGetStats').then(function (s) {
+    renderBarList('#typeChart', s.byType.map(function (t) { return { label: t.name, count: t.count }; }));
+    renderBarList('#yearChart', s.byYear.map(function (y) { return { label: y.year, count: y.count }; }));
+  }).catch(function () {});
+}
+function renderBarList(sel, items) {
+  var box = $(sel);
+  if (!items || !items.length) { box.innerHTML = '<div class="empty">Chưa có dữ liệu</div>'; return; }
+  var max = Math.max.apply(null, items.map(function (i) { return i.count; })) || 1;
+  box.innerHTML = items.map(function (i) {
+    var pct = Math.round(i.count / max * 100);
+    return '<div class="bar-row"><div class="bar-label"><span>' + esc(i.label) + '</span><b>' + i.count + '</b></div>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div></div>';
+  }).join('');
+}
+
+/* ============ Danh sách ============ */
+function loadList(page) {
+  if (!STATE.status || !STATE.status.initialized) { $('#listResults').innerHTML = notInit(); return; }
+  var q = {
+    keyword: $('#listKeyword').value.trim(),
+    typeCode: $('#listType').value,
+    sortBy: 'issuedDate', sortDir: 'desc',
+    page: page || 1, pageSize: 15
+  };
+  showLoading(true, 'Đang tải danh sách...');
+  call('apiSearch', q).then(function (res) {
+    renderResults('#listResults', res, q.keyword);
+    renderPager('#listPager', res, loadList);
+    showLoading(false);
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+/* ============ Tìm kiếm ============ */
+function doSearch(page) {
+  if (!STATE.status || !STATE.status.initialized) { $('#searchResults').innerHTML = notInit(); return; }
+  var sort = $('#sSort').value.split('|');
+  var q = {
+    keyword: $('#sKeyword').value.trim(),
+    typeCode: $('#sType').value,
+    fromDate: $('#sFrom').value,
+    toDate: $('#sTo').value,
+    sortBy: sort[0], sortDir: sort[1],
+    page: page || 1, pageSize: 15
+  };
+  showLoading(true, 'Đang tìm kiếm...');
+  call('apiSearch', q).then(function (res) {
+    renderResults('#searchResults', res, q.keyword);
+    renderPager('#searchPager', res, doSearch);
+    showLoading(false);
+    if (res.total === 0) toast('Không tìm thấy văn bản phù hợp.');
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+function notInit() {
+  return '<div class="empty">Hệ thống chưa được khởi tạo. Vào tab bất kỳ và nhấn "Khởi tạo hệ thống".</div>';
+}
+
+function renderResults(sel, res, keyword) {
+  var box = $(sel);
+  if (!res.items || !res.items.length) {
+    box.innerHTML = '<div class="empty">Không có văn bản nào.<br><span class="muted">Hãy tải văn bản lên folder Drive rồi vào tab "Quét &amp; Cập nhật".</span></div>';
+    return;
+  }
+  box.innerHTML = '';
+  var terms = (keyword || '').toLowerCase().split(/\s+/).filter(Boolean);
+  res.items.forEach(function (d) {
+    var item = el('div', 'doc-item');
+    var badge = el('div', 'doc-badge', esc(d.docTypeCode || '?'));
+    var main = el('div', 'doc-main');
+    main.innerHTML =
+      '<div class="doc-title">' + esc(d.title || d.fileName) + '</div>' +
+      '<div class="doc-meta">' +
+        '<span><b>' + esc(d.docType || 'Khác') + '</b></span>' +
+        (d.docNumber ? '<span>Số: <b>' + esc(d.docNumber) + '</b></span>' : '') +
+        '<span>Ngày BH: <b>' + fmtDate(d.issuedDate) + '</b></span>' +
+        '<span>' + esc(d.fileName) + '</span>' +
+        '<span class="tag ' + esc(d.ocrStatus) + '">' + ocrLabel(d.ocrStatus) + '</span>' +
+      '</div>' +
+      (d.snippet ? '<div class="doc-snippet">' + highlight(esc(d.snippet), terms) + '</div>' : '');
+    var actions = el('div', 'doc-actions');
+    var btnView = el('button', 'btn', 'Xem');
+    btnView.addEventListener('click', function () { openDetail(d.fileId); });
+    var btnOpen = el('a', 'btn', 'Mở file');
+    btnOpen.href = d.fileUrl; btnOpen.target = '_blank';
+    actions.appendChild(btnView);
+    actions.appendChild(btnOpen);
+    item.appendChild(badge); item.appendChild(main); item.appendChild(actions);
+    box.appendChild(item);
+  });
+}
+function ocrLabel(s) {
+  if (s === 'ok') return 'Đã trích xuất';
+  if (s === 'skip') return 'Không OCR';
+  if (s === 'error') return 'Lỗi OCR';
+  return s || '';
+}
+function highlight(text, terms) {
+  if (!terms || !terms.length) return text;
+  terms.forEach(function (t) {
+    if (t.length < 2) return;
+    try {
+      var re = new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+      text = text.replace(re, '<mark>$1</mark>');
+    } catch (e) {}
+  });
+  return text;
+}
+
+function renderPager(sel, res, fn) {
+  var box = $(sel);
+  box.innerHTML = '';
+  if (res.totalPages <= 1) {
+    if (res.total) box.innerHTML = '<span class="muted">Tổng ' + res.total + ' văn bản</span>';
+    return;
+  }
+  var info = el('span', 'muted', 'Tổng ' + res.total + ' VB — Trang ' + res.page + '/' + res.totalPages + '&nbsp;&nbsp;');
+  box.appendChild(info);
+  var start = Math.max(1, res.page - 2);
+  var end = Math.min(res.totalPages, start + 4);
+  if (res.page > 1) addPage(box, '‹', res.page - 1, fn, false);
+  for (var p = start; p <= end; p++) addPage(box, p, p, fn, p === res.page);
+  if (res.page < res.totalPages) addPage(box, '›', res.page + 1, fn, false);
+}
+function addPage(box, label, page, fn, active) {
+  var b = el('button', active ? 'active' : '', String(label));
+  b.addEventListener('click', function () { fn(page); });
+  box.appendChild(b);
+}
+
+/* ============ Chi tiết ============ */
+function openDetail(fileId) {
+  showLoading(true, 'Đang tải chi tiết...');
+  call('apiGetDetail', fileId).then(function (d) {
+    showLoading(false);
+    if (!d) { toast('Không tìm thấy văn bản.', 'err'); return; }
+    var html =
+      '<h2>' + esc(d.title || d.fileName) + '</h2>' +
+      '<div class="sys-info">' +
+        row('Loại VB', esc(d.docType) + ' (' + esc(d.docTypeCode) + ')') +
+        row('Số/Ký hiệu', esc(d.docNumber || '—')) +
+        row('Ngày ban hành', fmtDate(d.issuedDate)) +
+        row('Tên file', esc(d.fileName)) +
+        row('Đường dẫn', esc(d.folderPath || '/')) +
+        row('Trạng thái OCR', ocrLabel(d.ocrStatus)) +
+        row('Quét lúc', fmtDateTime(d.scannedAt)) +
+      '</div>' +
+      '<div class="form-row" style="margin-top:14px">' +
+        '<a class="btn btn-primary" href="' + esc(d.fileUrl) + '" target="_blank">Mở trên Drive</a>' +
+        '<button class="btn" id="btnReOcr">OCR lại</button>' +
+      '</div>' +
+      '<h3 style="margin-top:16px">Nội dung trích xuất</h3>' +
+      '<div class="detail-content">' + (d.content ? esc(d.content) : '<i>Chưa có nội dung. Nhấn "OCR lại" để trích xuất.</i>') + '</div>';
+    $('#modalContent').innerHTML = html;
+    $('#modal').classList.remove('hidden');
+    var btn = $('#btnReOcr');
+    if (btn) btn.addEventListener('click', function () { doReOcr(d.fileId); });
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+function row(k, v) { return '<div class="k">' + k + '</div><div>' + v + '</div>'; }
+function closeModal() { $('#modal').classList.add('hidden'); }
+
+function doReOcr(fileId) {
+  showLoading(true, 'Đang OCR lại (có thể mất chút thời gian)...');
+  call('apiReOcr', fileId).then(function () {
+    showLoading(false);
+    toast('Đã OCR lại thành công.', 'ok');
+    openDetail(fileId);
+  }).catch(function (err) { showLoading(false); toast('Lỗi OCR: ' + (err.message || err), 'err'); });
+}
+
+/* ============ Quét ============ */
+function loadUploadHint() {
+  if (!STATE.status || !STATE.status.initialized) {
+    $('#uploadHint').innerHTML = 'Hãy khởi tạo hệ thống trước (banner phía trên).';
+    return;
+  }
+  call('apiGetUploadInfo').then(function (info) {
+    $('#uploadHint').innerHTML =
+      '📁 Tải văn bản (PDF, ảnh scan, Word, Google Docs) vào folder gốc: ' +
+      '<a href="' + esc(info.folderUrl) + '" target="_blank"><b>' + esc(info.folderName) + '</b></a> ' +
+      'rồi nhấn <b>Quét ngay</b>.';
+  }).catch(function () {});
+}
+
+function doScan(force) {
+  if (!STATE.status || !STATE.status.initialized) { toast('Hãy khởi tạo hệ thống trước.', 'err'); return; }
+  showLoading(true, force ? 'Đang quét lại toàn bộ & OCR...' : 'Đang quét Drive...');
+  call('apiScan', force).then(function (s) {
+    showLoading(false);
+    $('#scanResult').innerHTML =
+      '<div class="muted" style="margin-bottom:6px">Kết quả quét:</div>' +
+      scanStat('Đã xử lý', s.scanned) +
+      scanStat('Thêm mới', s.inserted) +
+      scanStat('Cập nhật', s.updated) +
+      scanStat('OCR', s.ocr) +
+      scanStat('Bỏ qua', s.skipped) +
+      scanStat('Đã xoá', s.deleted) +
+      scanStat('Lỗi', s.errors) +
+      (s.limitHit ? '<div class="upload-hint" style="margin-top:10px">Còn văn bản chưa xử lý (giới hạn mỗi lượt). Nhấn <b>Quét ngay</b> lần nữa để tiếp tục.</div>' : '');
+    toast('Quét xong: +' + s.inserted + ' mới, ' + s.updated + ' cập nhật.', 'ok');
+    loadStatus();
+  }).catch(function (err) { showLoading(false); toast('Lỗi quét: ' + (err.message || err), 'err'); });
+}
+function scanStat(lbl, num) {
+  return '<span class="scan-stat">' + esc(lbl) + ': <b>' + (num || 0) + '</b></span>';
+}
+
+function setAutoScan(enable) {
+  var hours = parseInt($('#autoHours').value, 10);
+  showLoading(true, 'Đang cập nhật lịch quét...');
+  // apiSetAutoScan nhận 2 tham số nên gọi trực tiếp google.script.run.
+  google.script.run
+    .withSuccessHandler(function (r) {
+      showLoading(false);
+      toast(r.message, 'ok');
+      $('#autoStatus').innerHTML = r.autoScan ? 'Trạng thái: <b>Đang bật</b>' : 'Trạng thái: <b>Đã tắt</b>';
+      loadStatus();
+    })
+    .withFailureHandler(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); })
+    .apiSetAutoScan(enable, hours);
+}
+
+/* ============ Cài đặt ============ */
+function renderSysInfo() {
+  var st = STATE.status || {};
+  var box = $('#sysInfo');
+  var rootHtml = st.rootFolder ? '<a href="' + esc(st.rootFolder.url) + '" target="_blank">' + esc(st.rootFolder.name) + '</a>' : '<i>Chưa tạo</i>';
+  var dbHtml = st.database ? '<a href="' + esc(st.database.url) + '" target="_blank">' + esc(st.database.name) + '</a>' : '<i>Chưa tạo</i>';
+  box.innerHTML =
+    row('Tài khoản', esc(st.userEmail || '')) +
+    row('Trạng thái', st.initialized ? '<span class="tag ok">Đã khởi tạo</span>' : '<span class="tag error">Chưa khởi tạo</span>') +
+    row('Folder gốc', rootHtml) +
+    row('Cơ sở dữ liệu', dbHtml) +
+    row('Tổng văn bản', esc(st.totalDocs || 0)) +
+    row('Tự động quét', st.autoScan ? '<span class="tag ok">Đang bật</span>' : '<span class="tag skip">Tắt</span>') +
+    row('Quét gần nhất', fmtDateTime(st.lastScan));
+}
+
+function renderTypesTable() {
+  var t = $('#typesTable');
+  t.innerHTML =
+    '<tr><th style="width:70px">Mã</th><th style="width:180px">Tên loại</th><th>Từ khoá (phân loại tự động)</th><th style="width:60px">Xoá</th></tr>';
+  (STATE.docTypes || []).forEach(function (dt, idx) {
+    addTypeRowEl(t, dt, idx);
+  });
+}
+function addTypeRowEl(table, dt, idx) {
+  var tr = el('tr');
+  tr.innerHTML =
+    '<td><input value="' + esc(dt.code || '') + '" data-f="code"></td>' +
+    '<td><input value="' + esc(dt.name || '') + '" data-f="name"></td>' +
+    '<td><input value="' + esc((dt.keywords || []).join(', ')) + '" data-f="keywords"></td>' +
+    '<td style="text-align:center"><button class="btn" data-del="1">×</button></td>';
+  tr.querySelector('[data-del]').addEventListener('click', function () { tr.remove(); });
+  table.appendChild(tr);
+}
+function addTypeRow() {
+  addTypeRowEl($('#typesTable'), { code: '', name: '', keywords: [] }, -1);
+}
+function collectTypes() {
+  var rows = $all('#typesTable tr');
+  var out = [];
+  rows.forEach(function (tr, i) {
+    if (i === 0) return; // header
+    var code = tr.querySelector('[data-f="code"]').value.trim();
+    var name = tr.querySelector('[data-f="name"]').value.trim();
+    var kw = tr.querySelector('[data-f="keywords"]').value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    if (code && name) out.push({ code: code, name: name, priority: i, keywords: kw });
+  });
+  return out;
+}
+function saveTypes() {
+  var types = collectTypes();
+  if (!types.length) { toast('Cần ít nhất 1 loại văn bản.', 'err'); return; }
+  showLoading(true, 'Đang lưu...');
+  call('apiSaveDocTypes', types).then(function (dt) {
+    STATE.docTypes = dt;
+    fillTypeSelects();
+    showLoading(false);
+    toast('Đã lưu danh sách loại văn bản.', 'ok');
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+function resetTypes() {
+  showLoading(true, 'Đang khôi phục...');
+  call('apiResetDocTypes').then(function (dt) {
+    STATE.docTypes = dt;
+    fillTypeSelects();
+    renderTypesTable();
+    showLoading(false);
+    toast('Đã khôi phục danh sách mặc định.', 'ok');
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+</script>

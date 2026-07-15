@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('Stylesheet'); ?>
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">EPU</div>
+        <div class="brand-text">
+          <h1>Hệ thống Quản lý Văn bản</h1>
+          <p>Trường Đại học Điện lực</p>
+        </div>
+      </div>
+      <div class="user-box" id="userBox"></div>
+    </header>
+
+    <!-- Banner khởi tạo -->
+    <div id="initBanner" class="init-banner hidden">
+      <div>
+        <strong>Chào mừng!</strong> Hệ thống chưa được khởi tạo. Nhấn nút để tạo folder lưu văn bản và cơ sở dữ liệu trên Google Drive của bạn.
+      </div>
+      <button class="btn btn-primary" id="btnInit">Khởi tạo hệ thống</button>
+    </div>
+
+    <!-- Tabs -->
+    <nav class="tabs">
+      <button class="tab active" data-tab="overview">Tổng quan</button>
+      <button class="tab" data-tab="list">Danh sách văn bản</button>
+      <button class="tab" data-tab="search">Tìm kiếm</button>
+      <button class="tab" data-tab="scan">Quét &amp; Cập nhật</button>
+      <button class="tab" data-tab="settings">Cài đặt</button>
+    </nav>
+
+    <main class="content">
+      <!-- TAB: Tổng quan -->
+      <section class="tab-panel active" id="tab-overview">
+        <div class="stat-cards" id="statCards"></div>
+        <div class="two-col">
+          <div class="card">
+            <h3>Phân bố theo loại văn bản</h3>
+            <div id="typeChart" class="bar-list"></div>
+          </div>
+          <div class="card">
+            <h3>Phân bố theo năm ban hành</h3>
+            <div id="yearChart" class="bar-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: Danh sách -->
+      <section class="tab-panel" id="tab-list">
+        <div class="toolbar">
+          <select id="listType" class="input"></select>
+          <input type="text" id="listKeyword" class="input" placeholder="Lọc nhanh theo từ khoá...">
+          <button class="btn" id="btnListReload">Tải lại</button>
+        </div>
+        <div id="listResults" class="results"></div>
+        <div id="listPager" class="pager"></div>
+      </section>
+
+      <!-- TAB: Tìm kiếm -->
+      <section class="tab-panel" id="tab-search">
+        <div class="search-form card">
+          <div class="form-row">
+            <input type="text" id="sKeyword" class="input grow" placeholder="Nhập từ khoá (tên, số hiệu, nội dung...)">
+            <button class="btn btn-primary" id="btnSearch">Tìm kiếm</button>
+          </div>
+          <div class="form-row">
+            <label>Loại VB
+              <select id="sType" class="input"></select>
+            </label>
+            <label>Từ ngày
+              <input type="date" id="sFrom" class="input">
+            </label>
+            <label>Đến ngày
+              <input type="date" id="sTo" class="input">
+            </label>
+            <label>Sắp xếp
+              <select id="sSort" class="input">
+                <option value="issuedDate|desc">Ngày ban hành ↓</option>
+                <option value="issuedDate|asc">Ngày ban hành ↑</option>
+                <option value="fileName|asc">Tên A→Z</option>
+                <option value="docType|asc">Loại VB</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div id="searchResults" class="results"></div>
+        <div id="searchPager" class="pager"></div>
+      </section>
+
+      <!-- TAB: Quét -->
+      <section class="tab-panel" id="tab-scan">
+        <div class="card">
+          <h3>Quét &amp; Cập nhật văn bản từ Google Drive</h3>
+          <p class="muted">Hệ thống sẽ đọc toàn bộ file trong folder gốc (kể cả folder con), tự động OCR, phân loại và cập nhật vào cơ sở dữ liệu.</p>
+          <div class="upload-hint" id="uploadHint"></div>
+          <div class="form-row">
+            <button class="btn btn-primary" id="btnScan">Quét ngay</button>
+            <button class="btn" id="btnScanForce">Quét lại toàn bộ (OCR lại)</button>
+          </div>
+          <div id="scanResult" class="scan-result"></div>
+        </div>
+        <div class="card">
+          <h3>Tự động quét định kỳ</h3>
+          <p class="muted">Bật để hệ thống tự quét Drive theo lịch, không cần bấm thủ công.</p>
+          <div class="form-row">
+            <label>Tần suất
+              <select id="autoHours" class="input">
+                <option value="1">Mỗi 1 giờ</option>
+                <option value="4">Mỗi 4 giờ</option>
+                <option value="6" selected>Mỗi 6 giờ</option>
+                <option value="12">Mỗi 12 giờ</option>
+                <option value="24">Mỗi ngày</option>
+              </select>
+            </label>
+            <button class="btn btn-primary" id="btnAutoOn">Bật tự động quét</button>
+            <button class="btn" id="btnAutoOff">Tắt</button>
+          </div>
+          <div id="autoStatus" class="muted"></div>
+        </div>
+      </section>
+
+      <!-- TAB: Cài đặt -->
+      <section class="tab-panel" id="tab-settings">
+        <div class="card">
+          <h3>Thông tin hệ thống</h3>
+          <div id="sysInfo" class="sys-info"></div>
+        </div>
+        <div class="card">
+          <h3>Loại văn bản</h3>
+          <p class="muted">Danh sách loại VB dùng để tự động phân loại. Từ khoá cách nhau bởi dấu phẩy.</p>
+          <table class="types-table" id="typesTable"></table>
+          <div class="form-row">
+            <button class="btn" id="btnAddType">+ Thêm loại</button>
+            <button class="btn btn-primary" id="btnSaveTypes">Lưu</button>
+            <button class="btn" id="btnResetTypes">Khôi phục mặc định</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast hidden"></div>
+    <div id="modal" class="modal hidden">
+      <div class="modal-box">
+        <button class="modal-close" id="modalClose">×</button>
+        <div id="modalContent"></div>
+      </div>
+    </div>
+    <div id="loading" class="loading hidden"><div class="spinner"></div><span id="loadingText">Đang xử lý...</span></div>
+  </div>
+
+  <?!= include('JavaScript'); ?>
+</body>
+</html>

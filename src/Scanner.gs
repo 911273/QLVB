@@ -1,0 +1,170 @@
+/**
+ * Scanner.gs
+ * Tự động quét folder gốc trên Drive, phát hiện file mới/đã sửa,
+ * OCR + phân loại + ghi vào database.
+ */
+
+// Giới hạn số file xử lý mỗi lần quét để tránh timeout (Apps Script ~6 phút).
+var SCAN_BATCH_LIMIT = 40;
+
+/**
+ * Quét toàn bộ folder gốc (đệ quy) và cập nhật DB.
+ * options: { force: Boolean } - force=true sẽ OCR lại cả file cũ.
+ * Trả về thống kê.
+ */
+function scanDrive(options) {
+  options = options || {};
+  var force = !!options.force;
+
+  var root = getOrCreateRootFolder();
+  getOrCreateDatabase(); // đảm bảo DB tồn tại
+  var existing = getExistingIndex_();
+
+  var stats = { scanned: 0, inserted: 0, updated: 0, skipped: 0, ocr: 0, errors: 0, deleted: 0, limitHit: false };
+  var livingIds = {};
+
+  var files = collectFiles_(root, '', []);
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    livingIds[f.id] = true;
+
+    var hit = existing[f.id];
+    var changed = !hit || Number(hit.modifiedTime) !== Number(f.modifiedTime);
+
+    if (!force && !changed) {
+      stats.skipped++;
+      continue;
+    }
+    if (stats.scanned >= SCAN_BATCH_LIMIT) {
+      stats.limitHit = true;
+      break;
+    }
+
+    try {
+      var doc = processFile_(f, existing);
+      stats.scanned++;
+      if (doc.ocrStatus === 'ok') stats.ocr++;
+      if (doc._op === 'inserted') stats.inserted++;
+      else stats.updated++;
+    } catch (e) {
+      stats.errors++;
+      Logger.log('processFile error: ' + f.name + ' -> ' + e);
+    }
+  }
+
+  // Chỉ dọn file đã xoá khi đã duyệt hết (không bị cắt do limit)
+  if (!stats.limitHit) {
+    stats.deleted = removeDeletedDocs_(livingIds);
+  }
+
+  PropertiesService.getScriptProperties().setProperty(PROP_LAST_SCAN, new Date().toISOString());
+  writeLog_('Quét Drive', stats.scanned,
+    'Thêm ' + stats.inserted + ', Cập nhật ' + stats.updated +
+    ', OCR ' + stats.ocr + ', Xoá ' + stats.deleted +
+    (stats.limitHit ? ' (còn file chưa xử lý - chạy lại để tiếp tục)' : ''));
+
+  return stats;
+}
+
+/**
+ * Thu thập đệ quy tất cả file được hỗ trợ trong folder.
+ */
+function collectFiles_(folder, path, acc) {
+  var supported = {};
+  Object.keys(SUPPORTED_MIME).forEach(function (k) { supported[SUPPORTED_MIME[k]] = true; });
+
+  var it = folder.getFiles();
+  while (it.hasNext()) {
+    var file = it.next();
+    var mime = file.getMimeType();
+    if (!supported[mime]) continue;
+    acc.push({
+      id: file.getId(),
+      name: file.getName(),
+      mimeType: mime,
+      url: file.getUrl(),
+      modifiedTime: file.getLastUpdated().getTime(), // epoch millis (số) để so sánh ổn định
+      createdDate: file.getDateCreated(),
+      folderPath: path || '/'
+    });
+  }
+  var sub = folder.getFolders();
+  while (sub.hasNext()) {
+    var sf = sub.next();
+    collectFiles_(sf, path + '/' + sf.getName(), acc);
+  }
+  return acc;
+}
+
+/**
+ * Xử lý 1 file: OCR/đọc nội dung -> phân loại -> trích metadata -> upsert.
+ */
+function processFile_(f, existing) {
+  var res = extractContent(f.id, f.mimeType);
+  var content = res.text || '';
+
+  var cls = classifyDoc(f.name, content);
+  var docNumber = extractDocNumber(f.name, content);
+  var issued = extractIssuedDate(f.name, content, f.createdDate);
+  var title = extractTitle(f.name, content);
+
+  var doc = {
+    fileId: f.id,
+    fileName: f.name,
+    docType: cls.name,
+    docTypeCode: cls.code,
+    docNumber: docNumber,
+    issuedDate: issued,
+    title: title,
+    content: content.substring(0, 45000), // giới hạn để không vượt ô Sheets (~50k ký tự)
+    folderPath: f.folderPath,
+    mimeType: f.mimeType,
+    fileUrl: f.url,
+    modifiedTime: f.modifiedTime,
+    scannedAt: new Date().toISOString(),
+    ocrStatus: res.status
+  };
+  var op = upsertDoc_(doc, existing);
+  doc._op = op;
+  return doc;
+}
+
+/**
+ * Cài đặt trigger tự động quét theo giờ (mặc định mỗi 6 tiếng).
+ */
+function installAutoScanTrigger(hours) {
+  hours = hours || 6;
+  removeAutoScanTrigger();
+  ScriptApp.newTrigger('autoScanJob')
+    .timeBased()
+    .everyHours(hours)
+    .create();
+  return 'Đã bật tự động quét mỗi ' + hours + ' giờ.';
+}
+
+function removeAutoScanTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'autoScanJob') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      removed++;
+    }
+  }
+  return removed;
+}
+
+function hasAutoScanTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'autoScanJob') return true;
+  }
+  return false;
+}
+
+/**
+ * Hàm được trigger gọi. Lặp cho tới khi hết file (mỗi lần 1 batch).
+ */
+function autoScanJob() {
+  scanDrive({ force: false });
+}

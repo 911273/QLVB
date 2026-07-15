@@ -1,0 +1,5 @@
+# clasp chỉ đẩy các file trong src/ (rootDir=src)
+**/**
+!appsscript.json
+!*.gs
+!*.html
