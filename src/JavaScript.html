@@ -157,6 +157,7 @@ function bindActions() {
   $('#btnTestVision').addEventListener('click', testVision);
   $('#btnClearVision').addEventListener('click', clearVision);
   $('#btnChangePassword').addEventListener('click', changeOwnPassword);
+  var blc = $('#btnLogoCheck'); if (blc) blc.addEventListener('click', checkLogo);
   $('#btnAddAccount').addEventListener('click', function () { openAccountEditor(null); });
   $('#modalClose').addEventListener('click', closeModal);
   $('#modal').addEventListener('click', function (e) { if (e.target.id === 'modal') closeModal(); });
@@ -862,6 +863,26 @@ function resetIssuers() {
     renderIssuersTable();
     showLoading(false);
     toast('Đã khôi phục danh mục mặc định.', 'ok');
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+/* ============ Kiểm tra logo ============ */
+function checkLogo() {
+  showLoading(true, 'Đang kiểm tra logo...');
+  call('logoInfo').then(function (r) {
+    showLoading(false);
+    var box = $('#logoCheck');
+    if (!r.ok) { box.innerHTML = '<span style="color:var(--err)">' + esc(r.message) + '</span>'; return; }
+    var list = (r.logoFilesInRoot || []).map(function (f) {
+      return esc(f.name) + ' (' + esc(f.mime) + ', ' + Math.round(f.size / 1024) + ' KB)';
+    }).join('<br>') || '<i>Không có file nào tên chứa "logo" trong folder gốc</i>';
+    box.innerHTML =
+      '<div style="margin-top:8px;line-height:1.7">' +
+      'Folder gốc app đang dùng: <a href="' + esc(r.rootFolderUrl) + '" target="_blank"><b>' + esc(r.rootFolderName) + '</b></a><br>' +
+      'File "logo*" tìm thấy trong folder gốc:<br>' + list + '<br>' +
+      'Kết quả nạp logo: ' + (r.found ? '<span class="tag ok">Đã nạp (' + r.uriLength + ' ký tự)</span>' : '<span class="tag error">Chưa nạp được</span>') +
+      (!r.found ? '<br><b>Gợi ý:</b> mở link folder gốc ở trên và đảm bảo <b>logo.png</b> nằm TRỰC TIẾP trong đó (không phải folder con), rồi tải lại trang.' : '<br>Nếu logo vẫn chưa hiện, hãy tải lại trang bằng Ctrl+F5.') +
+      '</div>';
   }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
 }
 

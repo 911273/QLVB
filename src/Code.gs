@@ -53,6 +53,36 @@ function blobToDataUri_(blob) {
 }
 
 /**
+ * Chẩn đoán logo: app đang dùng folder gốc nào, có thấy file 'logo*' không.
+ */
+function getLogoInfo_() {
+  var folder = getExistingRootFolder_();
+  if (!folder) return { ok: false, message: 'Chưa cấu hình folder gốc. Hãy Khởi tạo hệ thống / Quét trước.' };
+  var info = {
+    ok: true,
+    rootFolderName: folder.getName(),
+    rootFolderId: folder.getId(),
+    rootFolderUrl: folder.getUrl(),
+    logoFilesInRoot: [],
+    found: false,
+    uriLength: 0
+  };
+  try {
+    var it = folder.getFiles(); var n = 0;
+    while (it.hasNext() && n < 100) {
+      n++; var f = it.next(); var nm = f.getName();
+      if (nm.toLowerCase().indexOf('logo') !== -1) {
+        info.logoFilesInRoot.push({ name: nm, mime: f.getMimeType(), size: f.getSize() });
+      }
+    }
+  } catch (e) {}
+  var uri = getLogoDataUri_();
+  info.found = !!uri;
+  info.uriLength = uri ? uri.length : 0;
+  return info;
+}
+
+/**
  * Cho phép nhúng file HTML con (CSS/JS) vào Index.
  */
 function include(filename) {
@@ -69,7 +99,7 @@ var METHOD_PERM = {
   updateDoc: 'edit', reOcr: 'edit', deleteDoc: 'delete',
   scan: 'scan', ocrQueueRun: 'scan', setOcrAuto: 'scan', setOcrLimit: 'scan', setAutoScan: 'scan',
   saveDocTypes: 'config', resetDocTypes: 'config', saveIssuers: 'config', resetIssuers: 'config',
-  setVisionKey: 'config', testVision: 'config', initialize: 'config',
+  setVisionKey: 'config', testVision: 'config', initialize: 'config', logoInfo: 'config',
   listAccounts: 'accounts', saveAccount: 'accounts', deleteAccount: 'accounts', resetPassword: 'accounts'
 };
 
@@ -110,6 +140,7 @@ function apiDispatch(token, method, payload) {
     case 'setVisionKey': return apiSetVisionKey(payload.key);
     case 'testVision':   return apiTestVision();
     case 'initialize':   return apiInitialize(acc);
+    case 'logoInfo':     return getLogoInfo_();
     case 'listAccounts': return listAccounts_();
     case 'saveAccount':  return saveAccount_(payload);
     case 'deleteAccount': return deleteAccount_(payload.email, acc.email);
