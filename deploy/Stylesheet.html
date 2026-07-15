@@ -39,7 +39,36 @@
   }
   .brand-text h1 { margin: 0; font-size: 18px; font-weight: 600; }
   .brand-text p { margin: 2px 0 0; font-size: 12px; opacity: .85; }
-  .user-box { font-size: 12px; opacity: .9; text-align: right; }
+  .user-box { font-size: 12px; opacity: .95; text-align: right; display: flex; align-items: center; gap: 10px; }
+  .user-box .tag { background: rgba(255,255,255,.2); color: #fff; }
+  .btn-logout { background: rgba(255,255,255,.15); color: #fff; border-color: rgba(255,255,255,.4); padding: 6px 12px; }
+  .btn-logout:hover { background: rgba(255,255,255,.28); }
+
+  /* Màn hình đăng nhập */
+  .login-screen {
+    position: fixed; inset: 0; background: linear-gradient(135deg, var(--primary-dark), var(--primary));
+    display: flex; align-items: center; justify-content: center; z-index: 800; padding: 20px;
+  }
+  .login-box {
+    background: #fff; border-radius: 14px; padding: 32px 28px; width: 100%; max-width: 380px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.3); text-align: center;
+  }
+  .login-logo {
+    width: 60px; height: 60px; border-radius: 12px; background: var(--primary); color: #fff;
+    font-weight: 800; font-size: 22px; display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 14px; letter-spacing: 1px;
+  }
+  .login-box h1 { font-size: 18px; margin: 0 0 4px; color: var(--primary-dark); }
+  .login-sub { font-size: 13px; color: var(--muted); margin: 0 0 20px; }
+  .login-field { display: flex; flex-direction: column; gap: 5px; text-align: left; font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+  .login-btn { width: 100%; padding: 11px; font-size: 15px; margin-top: 4px; }
+  .login-error { color: var(--err); font-size: 13px; min-height: 18px; margin-bottom: 6px; }
+  .login-hint { font-size: 12px; margin-top: 16px; }
+
+  /* Phân quyền */
+  .perm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .perm-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }
+  @media (max-width: 560px){ .perm-grid { grid-template-columns: 1fr; } }
 
   /* Init banner */
   .init-banner {

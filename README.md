@@ -14,6 +14,8 @@ Không cần server riêng, không cần cơ sở dữ liệu ngoài, không t�
   - *Nâng cao*: **Google Cloud Vision API** — chất lượng tiếng Việt cao (giữ đúng dấu). Nhập API key trong tab **Cài đặt**. Xem hướng dẫn lấy key ngay trong app.
 - 🕒 **OCR theo hàng đợi, xử lý dần**: khi quét, ảnh/PDF được xếp hàng đợi; hệ thống OCR từ từ (mỗi lượt vài văn bản, mỗi PDF vài trang) theo lịch, có **giới hạn số trang/ngày** để không vượt hạn mức miễn phí của Google. PDF nhiều trang được OCR dần qua nhiều lượt.
 - 👁️ **Xem bản gốc PDF/ảnh** ngay trong chi tiết văn bản (kể cả khi chưa OCR xong).
+- 🔐 **Tài khoản & phân quyền (RBAC)**: đăng nhập bằng email/mật khẩu (băm SHA-256 + token có chữ ký). Admin mặc định `vupq@epu.edu.vn` / `123456` (đổi được sau khi đăng nhập). Admin quản lý tài khoản, gán vai trò (Quản trị/Biên tập/Xem) và quyền theo chức năng (xem, sửa, quét/OCR, cấu hình, quản lý tài khoản).
+  - Để nhiều người dùng: khi Deploy đặt **Who has access = Anyone within EPU** (miền epu.edu.vn). Quản lý tài khoản trong app kiểm soát ai làm được gì.
 - 📊 Trang **tổng quan** thống kê theo loại và theo năm.
 
 ## Kiến trúc

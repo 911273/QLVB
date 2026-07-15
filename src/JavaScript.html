@@ -1,16 +1,24 @@
 <script>
-/* ============ Tiện ích gọi server (Promise hoá google.script.run) ============ */
-function call(fn, arg) {
+/* ============ Xác thực + gọi server qua apiDispatch ============ */
+var TOKEN = '';
+try { TOKEN = localStorage.getItem('qlvb_token') || ''; } catch (e) {}
+
+// Mọi lời gọi server đều đi qua apiDispatch(token, method, payload).
+function call(method, payload) {
   return new Promise(function (resolve, reject) {
     google.script.run
       .withSuccessHandler(resolve)
-      .withFailureHandler(function (err) { reject(err); })
-      [fn](arg);
+      .withFailureHandler(function (err) {
+        // Token hỏng/hết hạn -> quay lại màn hình đăng nhập.
+        if (err && /^AUTH:/.test(err.message || '')) { doLogout(true); }
+        reject(err);
+      })
+      .apiDispatch(TOKEN, method, payload || {});
   });
 }
 
 var TYPE_ICONS = {}; // code -> short label
-var STATE = { status: null, docTypes: [], issuers: [], issuerLevels: [] };
+var STATE = { status: null, docTypes: [], issuers: [], issuerLevels: [], me: null };
 
 /* ============ Tiện ích UI ============ */
 function $(sel, root) { return (root || document).querySelector(sel); }
@@ -54,8 +62,52 @@ function fmtDateTime(iso) {
 document.addEventListener('DOMContentLoaded', function () {
   bindTabs();
   bindActions();
-  loadStatus();
+  bindLogin();
+  if (TOKEN) { loadStatus(); }
+  else { showLogin(); }
 });
+
+/* ============ Đăng nhập / đăng xuất ============ */
+function showLogin() {
+  $('#loginScreen').classList.remove('hidden');
+  $('#app').classList.add('hidden');
+}
+function showApp() {
+  $('#loginScreen').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+}
+function bindLogin() {
+  $('#btnLogin').addEventListener('click', doLogin);
+  $('#loginPassword').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
+  $('#loginEmail').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
+}
+function doLogin() {
+  var email = $('#loginEmail').value.trim();
+  var pw = $('#loginPassword').value;
+  if (!email || !pw) { $('#loginError').textContent = 'Nhập email và mật khẩu.'; return; }
+  $('#loginError').textContent = '';
+  showLoading(true, 'Đang đăng nhập...');
+  call('login', { email: email, password: pw }).then(function (r) {
+    TOKEN = r.token;
+    try { localStorage.setItem('qlvb_token', TOKEN); } catch (e) {}
+    STATE.me = r.account;
+    $('#loginPassword').value = '';
+    showLoading(false);
+    showApp();
+    STATE.searched = false;
+    loadStatus();
+  }).catch(function (err) {
+    showLoading(false);
+    $('#loginError').textContent = (err && err.message) || 'Đăng nhập thất bại.';
+  });
+}
+function doLogout(silent) {
+  TOKEN = '';
+  try { localStorage.removeItem('qlvb_token'); } catch (e) {}
+  STATE.me = null; STATE.status = null; STATE.searched = false;
+  showLogin();
+  if (!silent) toast('Đã đăng xuất.', 'ok');
+}
 
 function bindTabs() {
   $all('.tab').forEach(function (tab) {
@@ -66,7 +118,7 @@ function bindTabs() {
       $('#tab-' + tab.dataset.tab).classList.add('active');
       if (tab.dataset.tab === 'list') loadList(1);
       if (tab.dataset.tab === 'overview') loadStats();
-      if (tab.dataset.tab === 'settings') { renderTypesTable(); renderIssuersTable(); renderVisionStatus(); }
+      if (tab.dataset.tab === 'settings') { renderTypesTable(); renderIssuersTable(); renderVisionStatus(); renderAccounts(); }
       if (tab.dataset.tab === 'scan') { loadUploadHint(); renderOcrQueue(); }
     });
   });
@@ -104,6 +156,8 @@ function bindActions() {
   $('#btnSaveVision').addEventListener('click', saveVision);
   $('#btnTestVision').addEventListener('click', testVision);
   $('#btnClearVision').addEventListener('click', clearVision);
+  $('#btnChangePassword').addEventListener('click', changeOwnPassword);
+  $('#btnAddAccount').addEventListener('click', function () { openAccountEditor(null); });
   $('#modalClose').addEventListener('click', closeModal);
   $('#modal').addEventListener('click', function (e) { if (e.target.id === 'modal') closeModal(); });
 }
@@ -111,12 +165,15 @@ function bindActions() {
 /* ============ Trạng thái hệ thống ============ */
 function loadStatus() {
   showLoading(true, 'Đang tải hệ thống...');
-  call('apiGetStatus').then(function (st) {
+  call('getStatus').then(function (st) {
     STATE.status = st;
     STATE.docTypes = st.docTypes || [];
     STATE.issuers = st.issuers || [];
     STATE.issuerLevels = st.issuerLevels || [];
-    $('#userBox').innerHTML = 'Đăng nhập: <b>' + esc(st.userEmail || '') + '</b>';
+    STATE.me = st.me || STATE.me;
+    showApp();
+    renderUserBox();
+    applyAcl();
     $('#initBanner').classList.toggle('hidden', st.initialized);
     fillTypeSelects();
     fillLevelSelect();
@@ -129,13 +186,45 @@ function loadStatus() {
     if (st.initialized && !STATE.searched) doSearch(1, true);
   }).catch(function (err) {
     showLoading(false);
+    if (err && /^AUTH:/.test(err.message || '')) return; // đã chuyển về đăng nhập
     toast('Lỗi tải trạng thái: ' + (err.message || err), 'err');
   });
 }
 
+function can(perm) { return !!(STATE.me && STATE.me.perms && STATE.me.perms[perm]); }
+
+function renderUserBox() {
+  var me = STATE.me || {};
+  var roleLabel = me.role === 'admin' ? 'Quản trị viên' : (me.role === 'editor' ? 'Biên tập' : 'Xem');
+  $('#userBox').innerHTML =
+    '<span>' + esc(me.name || me.email || '') + ' <span class="tag">' + roleLabel + '</span></span> ' +
+    '<button class="btn btn-logout" id="btnLogout">Đăng xuất</button>';
+  var b = $('#btnLogout');
+  if (b) b.addEventListener('click', function () { doLogout(false); });
+}
+
+// Ẩn/hiện tab & nút theo quyền của tài khoản đang đăng nhập.
+function applyAcl() {
+  // Tab Quét chỉ cho quyền scan; tab Cài đặt luôn hiện (ai cũng đổi được mật khẩu).
+  setTabVisible('scan', can('scan'));
+  toggleEl('#cardVision', can('config'));
+  toggleEl('#cardTypes', can('config'));
+  toggleEl('#cardIssuers', can('config'));
+  toggleEl('#cardAccounts', can('accounts'));
+  toggleEl('#btnInit', can('config'));
+}
+function setTabVisible(name, on) {
+  var tab = document.querySelector('.tab[data-tab="' + name + '"]');
+  if (tab) tab.style.display = on ? '' : 'none';
+}
+function toggleEl(sel, on) {
+  var e = $(sel);
+  if (e) e.classList.toggle('hidden', !on);
+}
+
 function doInitialize() {
   showLoading(true, 'Đang khởi tạo folder và cơ sở dữ liệu...');
-  call('apiInitialize').then(function (st) {
+  call('initialize').then(function (st) {
     STATE.status = st;
     STATE.docTypes = st.docTypes || [];
     STATE.issuers = st.issuers || [];
@@ -197,7 +286,7 @@ function statCardText(text, lbl) {
 }
 
 function loadStats() {
-  call('apiGetStats').then(function (s) {
+  call('getStats').then(function (s) {
     if (!s) return;
     renderBarList('#typeChart', (s.byType || []).map(function (t) { return { label: t.name, count: t.count }; }));
     renderBarList('#yearChart', (s.byYear || []).map(function (y) { return { label: y.year, count: y.count }; }));
@@ -226,7 +315,7 @@ function loadList(page) {
     page: page || 1, pageSize: 15
   };
   showLoading(true, 'Đang tải danh sách...');
-  call('apiSearch', q).then(function (res) {
+  call('search', q).then(function (res) {
     renderResults('#listResults', res, q.keyword);
     renderPager('#listPager', res, loadList);
     showLoading(false);
@@ -251,7 +340,7 @@ function doSearch(page, silent) {
     page: page || 1, pageSize: 15
   };
   if (!silent) showLoading(true, 'Đang tìm kiếm...');
-  call('apiSearch', q).then(function (res) {
+  call('search', q).then(function (res) {
     renderResults('#searchResults', res, q.keyword);
     renderPager('#searchPager', res, doSearch);
     var sum = $('#searchSummary');
@@ -384,7 +473,7 @@ function setModalWide_(on) {
 
 function openDetail(fileId) {
   showLoading(true, 'Đang tải chi tiết...');
-  call('apiGetDetail', fileId).then(function (d) {
+  call('getDetail', { fileId: fileId }).then(function (d) {
     showLoading(false);
     if (!d) { toast('Không tìm thấy văn bản.', 'err'); return; }
     var html =
@@ -402,8 +491,8 @@ function openDetail(fileId) {
       '</div>' +
       '<div class="form-row" style="margin-top:14px">' +
         '<a class="btn btn-primary" href="' + esc(d.fileUrl) + '" target="_blank">Mở trên Drive</a>' +
-        '<button class="btn" id="btnEditDoc">✎ Sửa thông tin</button>' +
-        '<button class="btn" id="btnReOcr">OCR lại</button>' +
+        (can('edit') ? '<button class="btn" id="btnEditDoc">✎ Sửa thông tin</button>' : '') +
+        (can('scan') ? '<button class="btn" id="btnReOcr">OCR lại</button>' : '') +
       '</div>' +
       previewBlock_(d) +
       '<h3 style="margin-top:16px">Nội dung trích xuất' + (d.ocrProgress ? ' <span class="muted" style="font-weight:normal">(đã OCR ' + esc(d.ocrProgress) + ' trang)</span>' : '') + '</h3>' +
@@ -490,7 +579,7 @@ function saveEdit(fileId) {
     content: $('#edContent').value
   };
   showLoading(true, 'Đang lưu...');
-  call('apiUpdateDoc', payload).then(function () {
+  call('updateDoc', payload).then(function () {
     showLoading(false);
     toast('Đã lưu thay đổi.', 'ok');
     openDetail(fileId);
@@ -504,7 +593,7 @@ function closeModal() { $('#modal').classList.add('hidden'); setModalWide_(false
 
 function doReOcr(fileId) {
   showLoading(true, 'Đang OCR lại (có thể mất chút thời gian)...');
-  call('apiReOcr', fileId).then(function () {
+  call('reOcr', { fileId: fileId }).then(function () {
     showLoading(false);
     toast('Đã OCR lại thành công.', 'ok');
     openDetail(fileId);
@@ -519,7 +608,7 @@ function loadUploadHint() {
     $('#uploadHint').innerHTML = 'Hãy khởi tạo hệ thống trước (banner phía trên).';
     return;
   }
-  call('apiGetUploadInfo').then(function (info) {
+  call('getUploadInfo').then(function (info) {
     $('#uploadHint').innerHTML =
       '📁 Tải văn bản (PDF, ảnh scan, Word, Google Docs) vào folder gốc: ' +
       '<a href="' + esc(info.folderUrl) + '" target="_blank"><b>' + esc(info.folderName) + '</b></a> ' +
@@ -530,7 +619,7 @@ function loadUploadHint() {
 function doScan(force) {
   if (!STATE.status || !STATE.status.initialized) { toast('Hãy khởi tạo hệ thống trước.', 'err'); return; }
   showLoading(true, force ? 'Đang quét lại toàn bộ & OCR...' : 'Đang quét Drive...');
-  call('apiScan', force).then(function (s) {
+  call('scan', { force: force }).then(function (s) {
     showLoading(false);
     $('#scanResult').innerHTML =
       '<div class="muted" style="margin-bottom:6px">Kết quả quét:</div>' +
@@ -554,16 +643,12 @@ function scanStat(lbl, num) {
 function setAutoScan(enable) {
   var hours = parseInt($('#autoHours').value, 10);
   showLoading(true, 'Đang cập nhật lịch quét...');
-  // apiSetAutoScan nhận 2 tham số nên gọi trực tiếp google.script.run.
-  google.script.run
-    .withSuccessHandler(function (r) {
-      showLoading(false);
-      toast(r.message, 'ok');
-      $('#autoStatus').innerHTML = r.autoScan ? 'Trạng thái: <b>Đang bật</b>' : 'Trạng thái: <b>Đã tắt</b>';
-      loadStatus();
-    })
-    .withFailureHandler(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); })
-    .apiSetAutoScan(enable, hours);
+  call('setAutoScan', { enable: enable, hours: hours }).then(function (r) {
+    showLoading(false);
+    toast(r.message, 'ok');
+    $('#autoStatus').innerHTML = r.autoScan ? 'Trạng thái: <b>Đang bật</b>' : 'Trạng thái: <b>Đã tắt</b>';
+    loadStatus();
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
 }
 
 /* ============ Hàng đợi OCR ============ */
@@ -583,7 +668,7 @@ function renderOcrQueue() {
 function doOcrRun() {
   if (!STATE.status || !STATE.status.initialized) { toast('Hãy khởi tạo hệ thống trước.', 'err'); return; }
   showLoading(true, 'Đang OCR hàng đợi...');
-  call('apiOcrQueueRun').then(function (s) {
+  call('ocrQueueRun', {}).then(function (s) {
     showLoading(false);
     $('#ocrRunResult').innerHTML =
       '<div class="muted" style="margin-bottom:6px">Kết quả OCR lượt này:</div>' +
@@ -604,7 +689,7 @@ function doOcrRun() {
 function saveOcrLimit() {
   var n = parseInt($('#ocrLimit').value, 10);
   showLoading(true, 'Đang lưu giới hạn...');
-  call('apiSetOcrLimit', n).then(function (r) {
+  call('setOcrLimit', { n: n }).then(function (r) {
     showLoading(false);
     if (STATE.status) STATE.status.ocrDailyLimit = r.dailyLimit;
     renderOcrQueue();
@@ -615,15 +700,12 @@ function saveOcrLimit() {
 function setOcrAuto(enable) {
   var hours = parseInt($('#ocrHours').value, 10);
   showLoading(true, 'Đang cập nhật lịch OCR...');
-  google.script.run
-    .withSuccessHandler(function (r) {
-      showLoading(false);
-      toast(r.message, 'ok');
-      loadStatus();
-      setTimeout(renderOcrQueue, 300);
-    })
-    .withFailureHandler(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); })
-    .apiSetOcrAuto(enable, hours);
+  call('setOcrAuto', { enable: enable, hours: hours }).then(function (r) {
+    showLoading(false);
+    toast(r.message, 'ok');
+    loadStatus();
+    setTimeout(renderOcrQueue, 300);
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
 }
 
 /* ============ Cài đặt ============ */
@@ -680,7 +762,7 @@ function saveTypes() {
   var types = collectTypes();
   if (!types.length) { toast('Cần ít nhất 1 loại văn bản.', 'err'); return; }
   showLoading(true, 'Đang lưu...');
-  call('apiSaveDocTypes', types).then(function (dt) {
+  call('saveDocTypes', { docTypes: types }).then(function (dt) {
     STATE.docTypes = dt;
     fillTypeSelects();
     showLoading(false);
@@ -689,7 +771,7 @@ function saveTypes() {
 }
 function resetTypes() {
   showLoading(true, 'Đang khôi phục...');
-  call('apiResetDocTypes').then(function (dt) {
+  call('resetDocTypes').then(function (dt) {
     STATE.docTypes = dt;
     fillTypeSelects();
     renderTypesTable();
@@ -750,7 +832,7 @@ function saveIssuers() {
   var issuers = collectIssuers();
   if (!issuers.length) { toast('Cần ít nhất 1 đơn vị.', 'err'); return; }
   showLoading(true, 'Đang lưu...');
-  call('apiSaveIssuers', issuers).then(function (list) {
+  call('saveIssuers', { issuers: issuers }).then(function (list) {
     STATE.issuers = list;
     showLoading(false);
     toast('Đã lưu danh mục đơn vị ban hành.', 'ok');
@@ -758,12 +840,135 @@ function saveIssuers() {
 }
 function resetIssuers() {
   showLoading(true, 'Đang khôi phục...');
-  call('apiResetIssuers').then(function (list) {
+  call('resetIssuers').then(function (list) {
     STATE.issuers = list;
     renderIssuersTable();
     showLoading(false);
     toast('Đã khôi phục danh mục mặc định.', 'ok');
   }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+/* ============ Đổi mật khẩu (mọi tài khoản) ============ */
+function changeOwnPassword() {
+  var oldp = $('#cpOld').value, np = $('#cpNew').value, cf = $('#cpConfirm').value;
+  if (!oldp || !np) { toast('Nhập đủ mật khẩu.', 'err'); return; }
+  if (np.length < 6) { toast('Mật khẩu mới phải từ 6 ký tự.', 'err'); return; }
+  if (np !== cf) { toast('Xác nhận mật khẩu không khớp.', 'err'); return; }
+  showLoading(true, 'Đang đổi mật khẩu...');
+  call('changePassword', { oldPassword: oldp, newPassword: np }).then(function () {
+    showLoading(false);
+    $('#cpOld').value = ''; $('#cpNew').value = ''; $('#cpConfirm').value = '';
+    toast('Đổi mật khẩu thành công.', 'ok');
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+/* ============ Quản lý tài khoản (admin) ============ */
+function renderAccounts() {
+  var box = $('#accountsList');
+  if (!box || !can('accounts')) return;
+  showLoading(true, 'Đang tải tài khoản...');
+  call('listAccounts').then(function (list) {
+    showLoading(false);
+    STATE.accounts = list;
+    var rows = '<tr><th>Email</th><th>Tên</th><th>Vai trò</th><th>Quyền</th><th>Trạng thái</th><th style="width:150px">Thao tác</th></tr>';
+    list.forEach(function (a) {
+      var perms = Object.keys(a.perms || {}).filter(function (k) { return a.perms[k]; }).join(', ');
+      rows += '<tr>' +
+        '<td>' + esc(a.email) + '</td>' +
+        '<td>' + esc(a.name || '') + '</td>' +
+        '<td>' + esc(roleLabel_(a.role)) + '</td>' +
+        '<td class="muted" style="font-size:11px">' + esc(perms) + '</td>' +
+        '<td>' + (a.active ? '<span class="tag ok">Hoạt động</span>' : '<span class="tag error">Khoá</span>') + '</td>' +
+        '<td><button class="btn" data-edit="' + esc(a.email) + '">Sửa</button> ' +
+            '<button class="btn" data-del="' + esc(a.email) + '">Xoá</button></td>' +
+        '</tr>';
+    });
+    box.innerHTML = rows;
+    $all('[data-edit]', box).forEach(function (b) {
+      b.addEventListener('click', function () {
+        var acc = STATE.accounts.filter(function (x) { return x.email === b.getAttribute('data-edit'); })[0];
+        openAccountEditor(acc);
+      });
+    });
+    $all('[data-del]', box).forEach(function (b) {
+      b.addEventListener('click', function () { deleteAccountUi(b.getAttribute('data-del')); });
+    });
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+function roleLabel_(r) { return r === 'admin' ? 'Quản trị viên' : (r === 'editor' ? 'Biên tập' : 'Xem'); }
+
+function openAccountEditor(acc) {
+  var isNew = !acc;
+  acc = acc || { email: '', name: '', role: 'viewer', active: true, perms: { view: true } };
+  var permBoxes = ['view', 'edit', 'scan', 'config', 'accounts'].map(function (k) {
+    var label = { view: 'Xem & tìm kiếm', edit: 'Sửa văn bản', scan: 'Quét & OCR', config: 'Cấu hình', accounts: 'Quản lý tài khoản' }[k];
+    return '<label class="perm-check"><input type="checkbox" data-perm="' + k + '"' + (acc.perms && acc.perms[k] ? ' checked' : '') + '> ' + label + '</label>';
+  }).join('');
+  var roleOpts = ['viewer', 'editor', 'admin'].map(function (r) {
+    return '<option value="' + r + '"' + (r === acc.role ? ' selected' : '') + '>' + roleLabel_(r) + '</option>';
+  }).join('');
+  var html =
+    '<h2>' + (isNew ? 'Thêm tài khoản' : 'Sửa tài khoản') + '</h2>' +
+    '<div class="edit-grid">' +
+      '<label>Email<input id="acEmail" class="input" value="' + esc(acc.email) + '"' + (isNew ? '' : ' readonly') + ' placeholder="ten@epu.edu.vn"></label>' +
+      '<label>Tên hiển thị<input id="acName" class="input" value="' + esc(acc.name || '') + '"></label>' +
+      '<label>Vai trò<select id="acRole" class="input">' + roleOpts + '</select></label>' +
+      '<label>Trạng thái<select id="acActive" class="input"><option value="1"' + (acc.active ? ' selected' : '') + '>Hoạt động</option><option value="0"' + (!acc.active ? ' selected' : '') + '>Khoá</option></select></label>' +
+      '<label class="full">Mật khẩu ' + (isNew ? '(bắt buộc)' : '(để trống nếu không đổi)') + '<input id="acPass" type="password" class="input" autocomplete="new-password" placeholder="Từ 6 ký tự"></label>' +
+      '<div class="full"><div class="muted" style="margin-bottom:4px">Quyền chi tiết (Quản trị viên luôn có mọi quyền):</div><div class="perm-grid">' + permBoxes + '</div></div>' +
+    '</div>' +
+    '<div class="form-row" style="margin-top:14px">' +
+      '<button class="btn btn-primary" id="btnSaveAccount">Lưu</button>' +
+      '<button class="btn" id="btnCancelAccount">Huỷ</button>' +
+    '</div>';
+  $('#modalContent').innerHTML = html;
+  setModalWide_(false);
+  $('#modal').classList.remove('hidden');
+  // Chọn vai trò -> tự tick quyền mặc định.
+  $('#acRole').addEventListener('change', function () {
+    var preset = { viewer: ['view'], editor: ['view', 'edit', 'scan'], admin: ['view', 'edit', 'scan', 'config', 'accounts'] }[this.value] || ['view'];
+    $all('[data-perm]').forEach(function (cb) { cb.checked = preset.indexOf(cb.getAttribute('data-perm')) !== -1; });
+  });
+  $('#btnCancelAccount').addEventListener('click', closeModal);
+  $('#btnSaveAccount').addEventListener('click', function () { saveAccountForm(isNew); });
+}
+function saveAccountForm(isNew) {
+  var perms = {};
+  $all('[data-perm]').forEach(function (cb) { perms[cb.getAttribute('data-perm')] = cb.checked; });
+  var payload = {
+    email: $('#acEmail').value.trim(),
+    name: $('#acName').value.trim(),
+    role: $('#acRole').value,
+    active: $('#acActive').value === '1',
+    perms: perms,
+    password: $('#acPass').value
+  };
+  if (!payload.email) { toast('Nhập email.', 'err'); return; }
+  showLoading(true, 'Đang lưu tài khoản...');
+  call('saveAccount', payload).then(function () {
+    showLoading(false);
+    closeModal();
+    toast('Đã lưu tài khoản.', 'ok');
+    renderAccounts();
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+function deleteAccountUi(email) {
+  var np = null;
+  openConfirm_('Xoá tài khoản ' + email + '?', function () {
+    showLoading(true, 'Đang xoá...');
+    call('deleteAccount', { email: email }).then(function () {
+      showLoading(false); toast('Đã xoá tài khoản.', 'ok'); renderAccounts();
+    }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+  });
+}
+function openConfirm_(msg, onYes) {
+  var html = '<h2>Xác nhận</h2><p>' + esc(msg) + '</p>' +
+    '<div class="form-row"><button class="btn btn-primary" id="cfYes">Đồng ý</button><button class="btn" id="cfNo">Huỷ</button></div>';
+  $('#modalContent').innerHTML = html;
+  setModalWide_(false);
+  $('#modal').classList.remove('hidden');
+  $('#cfNo').addEventListener('click', closeModal);
+  $('#cfYes').addEventListener('click', function () { closeModal(); onYes(); });
 }
 
 /* ============ OCR nâng cao (Vision) ============ */
@@ -781,7 +986,7 @@ function saveVision() {
   var key = $('#visionKey').value.trim();
   if (!key) { toast('Hãy dán API key trước.', 'err'); return; }
   showLoading(true, 'Đang lưu API key...');
-  call('apiSetVisionKey', key).then(function (r) {
+  call('setVisionKey', { key: key }).then(function (r) {
     showLoading(false);
     if (STATE.status) STATE.status.visionEnabled = r.visionEnabled;
     $('#visionKey').value = '';
@@ -792,14 +997,14 @@ function saveVision() {
 }
 function testVision() {
   showLoading(true, 'Đang kiểm tra API key...');
-  call('apiTestVision').then(function (r) {
+  call('testVision').then(function (r) {
     showLoading(false);
     toast(r.message, r.ok ? 'ok' : 'err');
   }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
 }
 function clearVision() {
   showLoading(true, 'Đang xoá API key...');
-  call('apiSetVisionKey', '').then(function (r) {
+  call('setVisionKey', { key: '' }).then(function (r) {
     showLoading(false);
     if (STATE.status) STATE.status.visionEnabled = r.visionEnabled;
     renderVisionStatus();

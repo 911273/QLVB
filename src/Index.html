@@ -6,7 +6,25 @@
   <?!= include('Stylesheet'); ?>
 </head>
 <body>
-  <div id="app">
+  <!-- Màn hình đăng nhập -->
+  <div id="loginScreen" class="login-screen">
+    <div class="login-box">
+      <div class="login-logo">EPU</div>
+      <h1>Hệ thống Quản lý Văn bản</h1>
+      <p class="login-sub">Trường Đại học Điện lực — Đăng nhập</p>
+      <label class="login-field">Email
+        <input type="email" id="loginEmail" class="input" placeholder="ten@epu.edu.vn" autocomplete="username">
+      </label>
+      <label class="login-field">Mật khẩu
+        <input type="password" id="loginPassword" class="input" placeholder="Mật khẩu" autocomplete="current-password">
+      </label>
+      <div id="loginError" class="login-error"></div>
+      <button class="btn btn-primary login-btn" id="btnLogin">Đăng nhập</button>
+      <p class="muted login-hint">Lần đầu: tài khoản <b>vupq@epu.edu.vn</b> / mật khẩu <b>123456</b> (hãy đổi sau khi đăng nhập).</p>
+    </div>
+  </div>
+
+  <div id="app" class="hidden">
     <!-- Header -->
     <header class="topbar">
       <div class="brand">
@@ -179,6 +197,24 @@
           <div id="sysInfo" class="sys-info"></div>
         </div>
         <div class="card">
+          <h3>Đổi mật khẩu</h3>
+          <p class="muted">Đổi mật khẩu cho tài khoản đang đăng nhập.</p>
+          <div class="form-row">
+            <label>Mật khẩu hiện tại<input type="password" id="cpOld" class="input" autocomplete="current-password"></label>
+            <label>Mật khẩu mới<input type="password" id="cpNew" class="input" autocomplete="new-password" placeholder="Từ 6 ký tự"></label>
+            <label>Xác nhận<input type="password" id="cpConfirm" class="input" autocomplete="new-password"></label>
+            <button class="btn btn-primary" id="btnChangePassword">Đổi mật khẩu</button>
+          </div>
+        </div>
+        <div class="card hidden" id="cardAccounts">
+          <h3>Quản lý tài khoản &amp; phân quyền</h3>
+          <p class="muted">Tạo tài khoản, gán vai trò và quyền theo chức năng. Quản trị viên có mọi quyền.</p>
+          <div class="form-row">
+            <button class="btn btn-primary" id="btnAddAccount">+ Thêm tài khoản</button>
+          </div>
+          <div style="overflow-x:auto"><table class="types-table" id="accountsList"></table></div>
+        </div>
+        <div class="card hidden" id="cardVision">
           <h3>OCR nâng cao (Google Cloud Vision) — chất lượng tiếng Việt cao</h3>
           <p class="muted">OCR tích hợp của Drive nhận dạng tiếng Việt kém. Nhập <b>Google Cloud Vision API key</b> để dùng động cơ OCR chất lượng cao (giữ đúng dấu). Nếu để trống, hệ thống dùng Drive OCR.</p>
           <div id="visionStatus" class="muted" style="margin-bottom:8px"></div>
@@ -198,7 +234,7 @@
             </ol>
           </details>
         </div>
-        <div class="card">
+        <div class="card" id="cardTypes">
           <h3>Loại văn bản</h3>
           <p class="muted">Danh sách loại VB dùng để tự động phân loại. Từ khoá cách nhau bởi dấu phẩy.</p>
           <table class="types-table" id="typesTable"></table>
@@ -208,7 +244,7 @@
             <button class="btn" id="btnResetTypes">Khôi phục mặc định</button>
           </div>
         </div>
-        <div class="card">
+        <div class="card" id="cardIssuers">
           <h3>Đơn vị ban hành</h3>
           <p class="muted">Danh mục đơn vị ban hành theo cấp, dùng để tự động nhận diện. Từ khoá cách nhau bởi dấu phẩy. Khi văn bản nhắc tới nhiều cấp, hệ thống chọn đơn vị ở cấp cụ thể nhất.</p>
           <table class="types-table" id="issuersTable"></table>

@@ -24,12 +24,70 @@ function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
 
+/* ============================ ĐIỀU PHỐI + PHÂN QUYỀN ============================ */
+
+// Bản đồ chức năng -> quyền cần có. null = chỉ cần đăng nhập.
+var METHOD_PERM = {
+  login: 'PUBLIC',
+  getStatus: null, changePassword: null, logout: null,
+  search: 'view', getDetail: 'view', getStats: 'view', getUploadInfo: 'view',
+  updateDoc: 'edit', reOcr: 'edit',
+  scan: 'scan', ocrQueueRun: 'scan', setOcrAuto: 'scan', setOcrLimit: 'scan', setAutoScan: 'scan',
+  saveDocTypes: 'config', resetDocTypes: 'config', saveIssuers: 'config', resetIssuers: 'config',
+  setVisionKey: 'config', testVision: 'config', initialize: 'config',
+  listAccounts: 'accounts', saveAccount: 'accounts', deleteAccount: 'accounts', resetPassword: 'accounts'
+};
+
+/**
+ * Điểm vào DUY NHẤT cho giao diện. Xác thực token + kiểm tra quyền rồi mới thực thi.
+ */
+function apiDispatch(token, method, payload) {
+  payload = payload || {};
+  if (method === 'login') return authLogin_(payload.email, payload.password);
+
+  var acc = authVerify_(token); // ném lỗi AUTH nếu token sai/hết hạn
+  if (!METHOD_PERM.hasOwnProperty(method)) throw new Error('Chức năng không hợp lệ.');
+  var need = METHOD_PERM[method];
+  if (need && need !== 'PUBLIC' && !acc.perms[need]) {
+    throw new Error('Bạn không có quyền thực hiện chức năng này.');
+  }
+
+  switch (method) {
+    case 'getStatus':    return apiGetStatus(acc);
+    case 'changePassword': return changePassword_(acc, payload.oldPassword, payload.newPassword);
+    case 'logout':       return { ok: true };
+    case 'search':       return searchDocs(payload);
+    case 'getDetail':    return getDocDetail(payload.fileId);
+    case 'getStats':     return apiGetStats();
+    case 'getUploadInfo': return apiGetUploadInfo();
+    case 'updateDoc':    return updateDocManual(payload);
+    case 'reOcr':        return reOcrDoc(payload.fileId);
+    case 'scan':         return scanDrive({ force: !!payload.force });
+    case 'ocrQueueRun':  return apiOcrQueueRun();
+    case 'setOcrAuto':   return apiSetOcrAuto(payload.enable, payload.hours);
+    case 'setOcrLimit':  return apiSetOcrLimit(payload.n);
+    case 'setAutoScan':  return apiSetAutoScan(payload.enable, payload.hours);
+    case 'saveDocTypes': return saveDocTypes(payload.docTypes || payload);
+    case 'resetDocTypes': return apiResetDocTypes();
+    case 'saveIssuers':  return saveIssuers(payload.issuers || payload);
+    case 'resetIssuers': return apiResetIssuers();
+    case 'setVisionKey': return apiSetVisionKey(payload.key);
+    case 'testVision':   return apiTestVision();
+    case 'initialize':   return apiInitialize(acc);
+    case 'listAccounts': return listAccounts_();
+    case 'saveAccount':  return saveAccount_(payload);
+    case 'deleteAccount': return deleteAccount_(payload.email, acc.email);
+    case 'resetPassword': return adminResetPassword_(payload.email, payload.newPassword);
+    default: throw new Error('Chức năng không hợp lệ.');
+  }
+}
+
 /* ============================ API ============================ */
 
 /**
  * Trạng thái hệ thống cho giao diện (khởi tạo lần đầu, folder, DB...).
  */
-function apiGetStatus() {
+function apiGetStatus(acc) {
   var props = PropertiesService.getScriptProperties();
   var rootId = props.getProperty(PROP_ROOT_FOLDER_ID);
   var dbId = props.getProperty(PROP_DB_SPREADSHEET_ID);
@@ -64,7 +122,8 @@ function apiGetStatus() {
     ocrAuto: hasOcrTrigger(),
     ocrDailyLimit: getOcrDailyLimit(),
     ocrUsedToday: ocrUsedToday_(),
-    userEmail: Session.getActiveUser().getEmail()
+    userEmail: (acc ? acc.email : Session.getActiveUser().getEmail()),
+    me: (acc ? publicAccount_(acc) : null)
   };
 }
 
@@ -78,11 +137,12 @@ function countDocs_() {
 /**
  * Khởi tạo hệ thống: tạo folder gốc + database. Gọi 1 lần khi lần đầu dùng.
  */
-function apiInitialize() {
+function apiInitialize(acc) {
   getOrCreateRootFolder();
   getOrCreateDatabase();
+  getAccountsSheet_(); // tạo bảng tài khoản + admin mặc định
   writeLog_('Khởi tạo hệ thống', 0, 'Tạo folder gốc và cơ sở dữ liệu');
-  return apiGetStatus();
+  return apiGetStatus(acc);
 }
 
 /**
