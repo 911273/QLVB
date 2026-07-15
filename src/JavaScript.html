@@ -499,8 +499,21 @@ function openDetail(fileId) {
   call('getDetail', { fileId: fileId }).then(function (d) {
     showLoading(false);
     if (!d) { toast('Không tìm thấy văn bản.', 'err'); return; }
+    var chip = function (t) { return t ? '<span class="chip">' + esc(t) + '</span>' : ''; };
     var html =
-      '<h2>' + esc(d.title || d.fileName) + '</h2>' +
+      '<div class="detail-head">' +
+        '<div class="detail-badge">' + esc(d.docTypeCode || '?') + '</div>' +
+        '<div style="flex:1;min-width:0">' +
+          '<h2>' + esc(d.title || d.fileName) + '</h2>' +
+          '<div class="detail-chips">' +
+            chip(d.docType) +
+            (d.docNumber ? chip('Số: ' + d.docNumber) : '') +
+            chip('Ngày: ' + fmtDate(d.issuedDate)) +
+            (d.issuer ? chip(d.issuer) : '') +
+            (d.issuerLevel ? chip(d.issuerLevel) : '') +
+          '</div>' +
+        '</div>' +
+      '</div>' +
       '<div class="sys-info">' +
         row('Loại VB', esc(d.docType) + ' (' + esc(d.docTypeCode) + ')') +
         row('Số/Ký hiệu', esc(d.docNumber || '—')) +
