@@ -42,9 +42,27 @@ function ocrWithVision_(fileId, mimeType) {
   var b64 = Utilities.base64Encode(blob.getBytes());
 
   if (mimeType === SUPPORTED_MIME.PDF || mimeType === SUPPORTED_MIME.TIFF) {
-    return visionAnnotateFile_(b64, mimeType, key);
+    var pages = [];
+    for (var i = 1; i <= VISION_PDF_MAX_PAGES; i++) pages.push(i);
+    return visionAnnotateFile_(b64, mimeType, key, pages).text;
   }
   return visionAnnotateImage_(b64, key);
+}
+
+/**
+ * OCR một cụm trang cụ thể của PDF/TIFF qua Vision.
+ * Trả về { text, totalPages, pagesDone }.
+ */
+function ocrVisionPages_(fileId, mimeType, pages) {
+  var key = getVisionApiKey_();
+  if (!key) throw new Error('Chưa cấu hình Vision API key.');
+  var file = DriveApp.getFileById(fileId);
+  if (file.getSize() > VISION_MAX_BYTES) {
+    throw new Error('File quá lớn cho Vision.');
+  }
+  var b64 = Utilities.base64Encode(file.getBlob().getBytes());
+  var r = visionAnnotateFile_(b64, mimeType, key, pages);
+  return { text: r.text, totalPages: r.totalPages, pagesDone: r.pagesDone };
 }
 
 /**
@@ -66,12 +84,15 @@ function visionAnnotateImage_(b64, key) {
 }
 
 /**
- * PDF/TIFF: files:annotate (đồng bộ, tối đa VISION_PDF_MAX_PAGES trang đầu).
+ * PDF/TIFF: files:annotate (đồng bộ). OCR các trang trong mảng `pages` (tối đa 5).
+ * Trả về { text, totalPages, pagesDone }.
  */
-function visionAnnotateFile_(b64, mimeType, key) {
+function visionAnnotateFile_(b64, mimeType, key, pages) {
+  if (!pages || !pages.length) {
+    pages = [];
+    for (var i = 1; i <= VISION_PDF_MAX_PAGES; i++) pages.push(i);
+  }
   var url = 'https://vision.googleapis.com/v1/files:annotate?key=' + encodeURIComponent(key);
-  var pages = [];
-  for (var i = 1; i <= VISION_PDF_MAX_PAGES; i++) pages.push(i);
   var payload = {
     requests: [{
       inputConfig: { content: b64, mimeType: mimeType },
@@ -83,7 +104,7 @@ function visionAnnotateFile_(b64, mimeType, key) {
   var res = visionFetch_(url, payload);
   var top = res.responses && res.responses[0];
   if (top && top.error) throw new Error('Vision: ' + top.error.message);
-  // files:annotate trả responses[0].responses[] cho từng trang
+  // files:annotate trả responses[0].responses[] cho từng trang + totalPages tổng số trang.
   var pageResponses = (top && top.responses) || [];
   var texts = [];
   for (var p = 0; p < pageResponses.length; p++) {
@@ -92,7 +113,11 @@ function visionAnnotateFile_(b64, mimeType, key) {
       texts.push(pr.fullTextAnnotation.text);
     }
   }
-  return texts.join('\n');
+  return {
+    text: texts.join('\n'),
+    totalPages: (top && top.totalPages) || pages.length,
+    pagesDone: pageResponses.length || pages.length
+  };
 }
 
 function visionFetch_(url, payload) {

@@ -12,6 +12,8 @@ Không cần server riêng, không cần cơ sở dữ liệu ngoài, không t�
 - 🔤 **OCR** ảnh scan và PDF bằng công cụ OCR của Google. Hai mức:
   - *Mặc định*: Drive OCR (không cần cấu hình, nhưng tiếng Việt kém).
   - *Nâng cao*: **Google Cloud Vision API** — chất lượng tiếng Việt cao (giữ đúng dấu). Nhập API key trong tab **Cài đặt**. Xem hướng dẫn lấy key ngay trong app.
+- 🕒 **OCR theo hàng đợi, xử lý dần**: khi quét, ảnh/PDF được xếp hàng đợi; hệ thống OCR từ từ (mỗi lượt vài văn bản, mỗi PDF vài trang) theo lịch, có **giới hạn số trang/ngày** để không vượt hạn mức miễn phí của Google. PDF nhiều trang được OCR dần qua nhiều lượt.
+- 👁️ **Xem bản gốc PDF/ảnh** ngay trong chi tiết văn bản (kể cả khi chưa OCR xong).
 - 📊 Trang **tổng quan** thống kê theo loại và theo năm.
 
 ## Kiến trúc

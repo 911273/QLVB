@@ -60,6 +60,10 @@ function apiGetStatus() {
     issuerLevels: getIssuerLevels(),
     totalDocs: countDocs_(),
     visionEnabled: hasVisionKey_(),
+    ocrPending: ocrQueueCount(),
+    ocrAuto: hasOcrTrigger(),
+    ocrDailyLimit: getOcrDailyLimit(),
+    ocrUsedToday: ocrUsedToday_(),
     userEmail: Session.getActiveUser().getEmail()
   };
 }
@@ -166,6 +170,33 @@ function apiSaveDocTypes(docTypes) {
 function apiResetDocTypes() {
   PropertiesService.getScriptProperties().deleteProperty(PROP_DOC_TYPES);
   return getDocTypes();
+}
+
+/**
+ * Chạy hàng đợi OCR một lượt (xử lý dần vài văn bản).
+ */
+function apiOcrQueueRun() {
+  var stats = ocrQueueRun({});
+  stats.pending = ocrQueueCount();
+  stats.usedToday = ocrUsedToday_();
+  stats.dailyLimit = getOcrDailyLimit();
+  return stats;
+}
+
+/**
+ * Bật/tắt lịch tự động OCR hàng đợi.
+ */
+function apiSetOcrAuto(enable, hours) {
+  if (enable) return { ok: true, message: installOcrTrigger(hours || 1), ocrAuto: true };
+  var n = removeOcrTrigger();
+  return { ok: true, message: 'Đã tắt tự động OCR (' + n + ' trigger).', ocrAuto: false };
+}
+
+/**
+ * Đặt hạn mức số trang OCR (Vision) mỗi ngày.
+ */
+function apiSetOcrLimit(n) {
+  return { ok: true, dailyLimit: setOcrDailyLimit(n) };
 }
 
 /**

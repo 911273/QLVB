@@ -18,16 +18,17 @@ var COLS = {
   FILE_URL: 10,      // Link mở file trên Drive
   MODIFIED_TIME: 11, // Thời điểm sửa file gần nhất (ISO)
   SCANNED_AT: 12,    // Thời điểm quét/cập nhật vào DB (ISO)
-  OCR_STATUS: 13,    // 'ok' | 'skip' | 'error'
+  OCR_STATUS: 13,    // 'ok' | 'ok-vision' | 'manual' | 'pending' | 'partial' | 'skip' | 'skip-large' | 'error'
   ISSUER: 14,        // Đơn vị ban hành (tên)
-  ISSUER_LEVEL: 15   // Cấp ban hành (Chính phủ, Bộ/Ngành, Trường, Khoa, Phòng/Ban...)
+  ISSUER_LEVEL: 15,  // Cấp ban hành (Chính phủ, Bộ/Ngành, Trường, Khoa, Phòng/Ban...)
+  OCR_PROGRESS: 16   // Tiến độ OCR dạng 'done/total' (số trang đã OCR / tổng số trang)
 };
 
 var DB_HEADERS = [
   'FileId', 'Tên file', 'Loại văn bản', 'Mã loại', 'Số/Ký hiệu',
   'Ngày ban hành', 'Trích yếu', 'Nội dung', 'Đường dẫn', 'MimeType',
   'Link Drive', 'Sửa lần cuối', 'Quét lúc', 'OCR',
-  'Đơn vị ban hành', 'Cấp ban hành'
+  'Đơn vị ban hành', 'Cấp ban hành', 'OCR tiến độ'
 ];
 
 /**
@@ -120,10 +121,13 @@ function ensureSheets_(ss) {
     docs.getRange(1, 1, 1, DB_HEADERS.length).setFontWeight('bold')
         .setBackground('#0B5394').setFontColor('#ffffff');
   } else {
-    // Bổ sung cột tiêu đề mới (tương thích CSDL cũ) nếu thiếu.
+    // Bổ sung cột tiêu đề mới (tương thích CSDL cũ) nếu thiếu/khác.
     var curHeaders = docs.getRange(1, 1, 1, DB_HEADERS.length).getValues()[0];
-    if (curHeaders[COLS.ISSUER] !== DB_HEADERS[COLS.ISSUER] ||
-        curHeaders[COLS.ISSUER_LEVEL] !== DB_HEADERS[COLS.ISSUER_LEVEL]) {
+    var needFix = false;
+    for (var h = 0; h < DB_HEADERS.length; h++) {
+      if (curHeaders[h] !== DB_HEADERS[h]) { needFix = true; break; }
+    }
+    if (needFix) {
       docs.getRange(1, 1, 1, DB_HEADERS.length).setValues([DB_HEADERS]);
       docs.getRange(1, 1, 1, DB_HEADERS.length).setFontWeight('bold')
           .setBackground('#0B5394').setFontColor('#ffffff');
@@ -190,7 +194,8 @@ function rowToObj_(r) {
     scannedAt: cell_(r[COLS.SCANNED_AT]),
     ocrStatus: cell_(r[COLS.OCR_STATUS]),
     issuer: cell_(r[COLS.ISSUER]),
-    issuerLevel: cell_(r[COLS.ISSUER_LEVEL])
+    issuerLevel: cell_(r[COLS.ISSUER_LEVEL]),
+    ocrProgress: cell_(r[COLS.OCR_PROGRESS])
   };
 }
 
@@ -241,6 +246,7 @@ function docToRow_(d) {
   row[COLS.OCR_STATUS] = d.ocrStatus;
   row[COLS.ISSUER] = d.issuer || '';
   row[COLS.ISSUER_LEVEL] = d.issuerLevel || '';
+  row[COLS.OCR_PROGRESS] = d.ocrProgress || '';
   return row;
 }
 

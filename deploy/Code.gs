@@ -1,7 +1,7 @@
 /*************************************************************************
  * QLVB-EPU - FILE MÃ NGUỒN GỘP (dán toàn bộ vào 1 file Code.gs)
  * Hệ thống Quản lý Văn bản - Trường Đại học Điện lực
- * Gồm: Config + Storage + Classifier + Issuer + Vision + Ocr + Scanner + Search + Code
+ * Gồm: Config + Storage + Classifier + Issuer + Vision + Ocr + OcrQueue + Scanner + Search + Code
  *************************************************************************/
 
 /* ===================== Config.gs ===================== */
@@ -37,6 +37,44 @@ var VISION_LANGUAGE_HINTS = ['vi', 'en'];
 var VISION_PDF_MAX_PAGES = 5;
 // Không gửi lên Vision nếu file lớn hơn mức này (giới hạn kích thước request ~ dưới 20MB).
 var VISION_MAX_BYTES = 18 * 1024 * 1024;
+
+// ===== Hàng đợi OCR (xử lý dần để tránh vượt hạn mức miễn phí của Google) =====
+var OCR_QUEUE_BATCH_FILES = 5;      // Số văn bản xử lý mỗi lượt chạy hàng đợi.
+var OCR_VISION_PAGES_PER_RUN = 5;   // Số trang OCR mỗi văn bản mỗi lượt (Vision tối đa 5).
+var DEFAULT_OCR_DAILY_LIMIT = 200;  // Hạn mức số trang OCR bằng Vision mỗi ngày (mặc định).
+var PROP_OCR_DAILY_LIMIT = 'OCR_DAILY_LIMIT';
+var PROP_OCR_USED_DATE = 'OCR_USED_DATE';
+var PROP_OCR_USED_COUNT = 'OCR_USED_COUNT';
+
+function getOcrDailyLimit() {
+  var v = parseInt(PropertiesService.getScriptProperties().getProperty(PROP_OCR_DAILY_LIMIT), 10);
+  return (v && v > 0) ? v : DEFAULT_OCR_DAILY_LIMIT;
+}
+function setOcrDailyLimit(n) {
+  n = parseInt(n, 10);
+  if (!n || n < 0) n = DEFAULT_OCR_DAILY_LIMIT;
+  PropertiesService.getScriptProperties().setProperty(PROP_OCR_DAILY_LIMIT, String(n));
+  return getOcrDailyLimit();
+}
+function todayKey_() {
+  return Utilities.formatDate(new Date(), 'Asia/Ho_Chi_Minh', 'yyyy-MM-dd');
+}
+function ocrUsedToday_() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty(PROP_OCR_USED_DATE) !== todayKey_()) return 0;
+  return parseInt(props.getProperty(PROP_OCR_USED_COUNT), 10) || 0;
+}
+function ocrBudgetRemaining_() {
+  return Math.max(0, getOcrDailyLimit() - ocrUsedToday_());
+}
+function ocrConsume_(pages) {
+  if (!pages || pages <= 0) return;
+  var props = PropertiesService.getScriptProperties();
+  var used = (props.getProperty(PROP_OCR_USED_DATE) === todayKey_())
+    ? (parseInt(props.getProperty(PROP_OCR_USED_COUNT), 10) || 0) : 0;
+  props.setProperty(PROP_OCR_USED_DATE, todayKey_());
+  props.setProperty(PROP_OCR_USED_COUNT, String(used + pages));
+}
 
 // Kích thước tối đa (byte) cho phép OCR. File lớn hơn sẽ bị bỏ qua OCR
 // (vì Google OCR dễ thất bại/timeout với PDF scan rất lớn) nhưng VẪN được lập chỉ mục
@@ -215,16 +253,17 @@ var COLS = {
   FILE_URL: 10,      // Link mở file trên Drive
   MODIFIED_TIME: 11, // Thời điểm sửa file gần nhất (ISO)
   SCANNED_AT: 12,    // Thời điểm quét/cập nhật vào DB (ISO)
-  OCR_STATUS: 13,    // 'ok' | 'skip' | 'error'
+  OCR_STATUS: 13,    // 'ok' | 'ok-vision' | 'manual' | 'pending' | 'partial' | 'skip' | 'skip-large' | 'error'
   ISSUER: 14,        // Đơn vị ban hành (tên)
-  ISSUER_LEVEL: 15   // Cấp ban hành (Chính phủ, Bộ/Ngành, Trường, Khoa, Phòng/Ban...)
+  ISSUER_LEVEL: 15,  // Cấp ban hành (Chính phủ, Bộ/Ngành, Trường, Khoa, Phòng/Ban...)
+  OCR_PROGRESS: 16   // Tiến độ OCR dạng 'done/total' (số trang đã OCR / tổng số trang)
 };
 
 var DB_HEADERS = [
   'FileId', 'Tên file', 'Loại văn bản', 'Mã loại', 'Số/Ký hiệu',
   'Ngày ban hành', 'Trích yếu', 'Nội dung', 'Đường dẫn', 'MimeType',
   'Link Drive', 'Sửa lần cuối', 'Quét lúc', 'OCR',
-  'Đơn vị ban hành', 'Cấp ban hành'
+  'Đơn vị ban hành', 'Cấp ban hành', 'OCR tiến độ'
 ];
 
 /**
@@ -317,10 +356,13 @@ function ensureSheets_(ss) {
     docs.getRange(1, 1, 1, DB_HEADERS.length).setFontWeight('bold')
         .setBackground('#0B5394').setFontColor('#ffffff');
   } else {
-    // Bổ sung cột tiêu đề mới (tương thích CSDL cũ) nếu thiếu.
+    // Bổ sung cột tiêu đề mới (tương thích CSDL cũ) nếu thiếu/khác.
     var curHeaders = docs.getRange(1, 1, 1, DB_HEADERS.length).getValues()[0];
-    if (curHeaders[COLS.ISSUER] !== DB_HEADERS[COLS.ISSUER] ||
-        curHeaders[COLS.ISSUER_LEVEL] !== DB_HEADERS[COLS.ISSUER_LEVEL]) {
+    var needFix = false;
+    for (var h = 0; h < DB_HEADERS.length; h++) {
+      if (curHeaders[h] !== DB_HEADERS[h]) { needFix = true; break; }
+    }
+    if (needFix) {
       docs.getRange(1, 1, 1, DB_HEADERS.length).setValues([DB_HEADERS]);
       docs.getRange(1, 1, 1, DB_HEADERS.length).setFontWeight('bold')
           .setBackground('#0B5394').setFontColor('#ffffff');
@@ -387,7 +429,8 @@ function rowToObj_(r) {
     scannedAt: cell_(r[COLS.SCANNED_AT]),
     ocrStatus: cell_(r[COLS.OCR_STATUS]),
     issuer: cell_(r[COLS.ISSUER]),
-    issuerLevel: cell_(r[COLS.ISSUER_LEVEL])
+    issuerLevel: cell_(r[COLS.ISSUER_LEVEL]),
+    ocrProgress: cell_(r[COLS.OCR_PROGRESS])
   };
 }
 
@@ -438,6 +481,7 @@ function docToRow_(d) {
   row[COLS.OCR_STATUS] = d.ocrStatus;
   row[COLS.ISSUER] = d.issuer || '';
   row[COLS.ISSUER_LEVEL] = d.issuerLevel || '';
+  row[COLS.OCR_PROGRESS] = d.ocrProgress || '';
   return row;
 }
 
@@ -796,9 +840,27 @@ function ocrWithVision_(fileId, mimeType) {
   var b64 = Utilities.base64Encode(blob.getBytes());
 
   if (mimeType === SUPPORTED_MIME.PDF || mimeType === SUPPORTED_MIME.TIFF) {
-    return visionAnnotateFile_(b64, mimeType, key);
+    var pages = [];
+    for (var i = 1; i <= VISION_PDF_MAX_PAGES; i++) pages.push(i);
+    return visionAnnotateFile_(b64, mimeType, key, pages).text;
   }
   return visionAnnotateImage_(b64, key);
+}
+
+/**
+ * OCR một cụm trang cụ thể của PDF/TIFF qua Vision.
+ * Trả về { text, totalPages, pagesDone }.
+ */
+function ocrVisionPages_(fileId, mimeType, pages) {
+  var key = getVisionApiKey_();
+  if (!key) throw new Error('Chưa cấu hình Vision API key.');
+  var file = DriveApp.getFileById(fileId);
+  if (file.getSize() > VISION_MAX_BYTES) {
+    throw new Error('File quá lớn cho Vision.');
+  }
+  var b64 = Utilities.base64Encode(file.getBlob().getBytes());
+  var r = visionAnnotateFile_(b64, mimeType, key, pages);
+  return { text: r.text, totalPages: r.totalPages, pagesDone: r.pagesDone };
 }
 
 /**
@@ -820,12 +882,15 @@ function visionAnnotateImage_(b64, key) {
 }
 
 /**
- * PDF/TIFF: files:annotate (đồng bộ, tối đa VISION_PDF_MAX_PAGES trang đầu).
+ * PDF/TIFF: files:annotate (đồng bộ). OCR các trang trong mảng `pages` (tối đa 5).
+ * Trả về { text, totalPages, pagesDone }.
  */
-function visionAnnotateFile_(b64, mimeType, key) {
+function visionAnnotateFile_(b64, mimeType, key, pages) {
+  if (!pages || !pages.length) {
+    pages = [];
+    for (var i = 1; i <= VISION_PDF_MAX_PAGES; i++) pages.push(i);
+  }
   var url = 'https://vision.googleapis.com/v1/files:annotate?key=' + encodeURIComponent(key);
-  var pages = [];
-  for (var i = 1; i <= VISION_PDF_MAX_PAGES; i++) pages.push(i);
   var payload = {
     requests: [{
       inputConfig: { content: b64, mimeType: mimeType },
@@ -837,7 +902,7 @@ function visionAnnotateFile_(b64, mimeType, key) {
   var res = visionFetch_(url, payload);
   var top = res.responses && res.responses[0];
   if (top && top.error) throw new Error('Vision: ' + top.error.message);
-  // files:annotate trả responses[0].responses[] cho từng trang
+  // files:annotate trả responses[0].responses[] cho từng trang + totalPages tổng số trang.
   var pageResponses = (top && top.responses) || [];
   var texts = [];
   for (var p = 0; p < pageResponses.length; p++) {
@@ -846,7 +911,11 @@ function visionAnnotateFile_(b64, mimeType, key) {
       texts.push(pr.fullTextAnnotation.text);
     }
   }
-  return texts.join('\n');
+  return {
+    text: texts.join('\n'),
+    totalPages: (top && top.totalPages) || pages.length,
+    pagesDone: pageResponses.length || pages.length
+  };
 }
 
 function visionFetch_(url, payload) {
@@ -985,12 +1054,10 @@ function convertToDocAndRead_(fileId, mimeType, unused) {
 }
 
 /**
- * OCR lại 1 file theo yêu cầu từ giao diện (chạy lại OCR & cập nhật DB).
+ * OCR lại 1 file theo yêu cầu từ giao diện: đặt lại về hàng đợi và OCR ngay 1 bước
+ * (với PDF nhiều trang sẽ OCR cụm trang đầu; các trang còn lại do hàng đợi nền OCR tiếp).
  */
 function reOcrDoc(fileId) {
-  var file = DriveApp.getFileById(fileId);
-  var mimeType = file.getMimeType();
-  var res = extractContent(fileId, mimeType);
   var docs = readAllDocs();
   var existing = getExistingIndex_();
   var current = null;
@@ -999,19 +1066,222 @@ function reOcrDoc(fileId) {
   }
   if (!current) throw new Error('Không tìm thấy văn bản trong CSDL.');
 
-  current.content = res.text;
-  current.ocrStatus = res.status;
-  current.title = extractTitle(current.fileName, res.text) || current.title;
-  if (!current.docNumber) current.docNumber = extractDocNumber(current.fileName, res.text);
-  if (!current.issuer) {
-    var iss = detectIssuer_(current.fileName, res.text);
-    current.issuer = iss.name;
-    current.issuerLevel = iss.level;
+  // Đặt lại nội dung & tiến độ để OCR lại từ đầu.
+  current.content = '';
+  current.ocrProgress = '';
+  current.ocrStatus = 'pending';
+
+  var step = ocrOneStep_(current, ocrBudgetRemaining_());
+  if (step && !step.skip) {
+    current.content = step.content;
+    current.ocrStatus = step.status;
+    current.ocrProgress = step.progress || '';
+    if (step.pages) ocrConsume_(step.pages);
+    if (step.done && (step.status === 'ok' || step.status === 'ok-vision')) {
+      finalizeDocAfterOcr_(current);
+    }
   }
   current.scannedAt = new Date().toISOString();
   upsertDoc_(current, existing);
   writeLog_('OCR lại', 1, current.fileName);
   return current;
+}
+
+
+/* ===================== OcrQueue.gs ===================== */
+/**
+ * OcrQueue.gs
+ * Hàng đợi OCR: quét chỉ lập chỉ mục nhanh và xếp OCR vào hàng đợi;
+ * tiến trình nền OCR "từ từ" theo lịch, mỗi lượt vài văn bản, mỗi PDF vài trang,
+ * và có hạn mức số trang/ngày để không vượt giới hạn miễn phí của Google (Vision).
+ *
+ * Trạng thái OCR liên quan:
+ *   'pending'  - đã xếp hàng, chưa OCR trang nào
+ *   'partial'  - đã OCR một phần (PDF nhiều trang), còn trang chưa OCR
+ *   'ok'/'ok-vision' - đã OCR xong
+ *   'skip-large' - file quá lớn, không OCR inline được (nên tách nhỏ)
+ *   'error'    - lỗi khi OCR
+ */
+
+// Văn bản cần xử lý trong hàng đợi (chưa OCR xong).
+function needsOcr_(d) {
+  if (!d) return false;
+  if (OCR_MIME_TYPES.indexOf(d.mimeType) === -1) return false;
+  return d.ocrStatus === 'pending' || d.ocrStatus === 'partial';
+}
+
+// Đếm số văn bản đang chờ OCR.
+function ocrQueueCount() {
+  var docs = readAllDocs();
+  var n = 0;
+  for (var i = 0; i < docs.length; i++) if (needsOcr_(docs[i])) n++;
+  return n;
+}
+
+function parseProgress_(s) {
+  var m = String(s || '').match(/^(\d+)\s*\/\s*(\d+)/);
+  if (m) return { done: parseInt(m[1], 10), total: parseInt(m[2], 10) };
+  return { done: 0, total: 0 };
+}
+
+function appendContent_(oldText, addText) {
+  var t = (oldText ? oldText + '\n' : '') + (addText || '');
+  return t.substring(0, 45000);
+}
+
+/**
+ * OCR "một bước" cho 1 văn bản (vài trang). Trả về:
+ *   { status, pages (số trang Vision đã dùng), content, progress, done }
+ * Nếu hết ngân sách -> { skip:true }.
+ */
+function ocrOneStep_(d, budgetPages) {
+  var file = DriveApp.getFileById(d.fileId);
+  var mime = d.mimeType || file.getMimeType();
+  var size = file.getSize();
+  var useVision = hasVisionKey_();
+
+  if (useVision) {
+    if (size > VISION_MAX_BYTES) {
+      return { status: 'skip-large', pages: 0, content: d.content, progress: d.ocrProgress || '', done: true };
+    }
+    if (mime === SUPPORTED_MIME.PDF || mime === SUPPORTED_MIME.TIFF) {
+      var prog = parseProgress_(d.ocrProgress);
+      var start = prog.done; // số trang đã OCR
+      // Đã OCR hết -> hoàn tất.
+      if (prog.total > 0 && start >= prog.total) {
+        return { status: 'ok-vision', pages: 0, content: d.content, progress: start + '/' + prog.total, done: true };
+      }
+      var count = Math.min(OCR_VISION_PAGES_PER_RUN, budgetPages);
+      if (prog.total > 0) count = Math.min(count, prog.total - start);
+      if (count <= 0) return { skip: true };
+      var pages = [];
+      for (var i = 0; i < count; i++) pages.push(start + 1 + i);
+      var r = ocrVisionPages_(d.fileId, mime, pages);
+      var total = r.totalPages || prog.total || (start + count);
+      var newDone = Math.min(total, start + count); // tiến chắc chắn theo số trang đã yêu cầu
+      var isDone = newDone >= total;
+      return {
+        status: isDone ? 'ok-vision' : 'partial',
+        pages: count,
+        content: appendContent_(d.content, r.text),
+        progress: newDone + '/' + total,
+        done: isDone
+      };
+    }
+    // Ảnh: OCR trọn (tính 1 trang).
+    var timg = ocrWithVision_(d.fileId, mime);
+    return { status: 'ok-vision', pages: 1, content: timg, progress: '1/1', done: true };
+  }
+
+  // Không có Vision -> Drive OCR (miễn phí, không tính ngân sách), OCR trọn 1 lần.
+  if (size > MAX_OCR_BYTES) {
+    return { status: 'skip-large', pages: 0, content: d.content, progress: d.ocrProgress || '', done: true };
+  }
+  var res = extractContent(d.fileId, mime);
+  return { status: (res.status === 'ok' ? 'ok' : res.status), pages: 0, content: res.text, progress: '', done: true };
+}
+
+/**
+ * Sau khi OCR xong: suy lại loại/số hiệu/ngày/đơn vị/trích yếu từ nội dung (nếu còn thiếu).
+ */
+function finalizeDocAfterOcr_(d) {
+  var content = d.content || '';
+  d.title = extractTitle(d.fileName, content) || d.title;
+  if (!d.docNumber) d.docNumber = extractDocNumber(d.fileName, content);
+  if (!d.docTypeCode || d.docTypeCode === 'KHAC') {
+    var cls = classifyDoc(d.fileName, content);
+    d.docType = cls.name; d.docTypeCode = cls.code;
+  }
+  if (!d.issuer) {
+    var iss = detectIssuer_(d.fileName, content);
+    d.issuer = iss.name; d.issuerLevel = iss.level;
+  }
+  if (!d.issuedDate) d.issuedDate = extractIssuedDate(d.fileName, content, null);
+}
+
+/**
+ * Chạy hàng đợi OCR một lượt.
+ * options: { maxFiles }
+ */
+function ocrQueueRun(options) {
+  options = options || {};
+  var maxFiles = options.maxFiles || OCR_QUEUE_BATCH_FILES;
+  var docs = readAllDocs();
+  var existing = getExistingIndex_();
+  var useVision = hasVisionKey_();
+  var budget = ocrBudgetRemaining_();
+
+  var stats = {
+    processed: 0, completed: 0, partial: 0, skippedLarge: 0, errors: 0,
+    pagesUsed: 0, remainingQueue: 0, budgetLeft: budget, usedVision: useVision
+  };
+
+  for (var i = 0; i < docs.length; i++) {
+    var d = docs[i];
+    if (!needsOcr_(d)) continue;
+
+    if (stats.processed >= maxFiles) { stats.remainingQueue++; continue; }
+    if (useVision && budget <= 0) { stats.remainingQueue++; continue; }
+
+    try {
+      var step = ocrOneStep_(d, budget);
+      if (step.skip) { stats.remainingQueue++; continue; }
+
+      d.content = step.content;
+      d.ocrStatus = step.status;
+      d.ocrProgress = step.progress || '';
+      if (step.done && (step.status === 'ok' || step.status === 'ok-vision')) {
+        finalizeDocAfterOcr_(d);
+      }
+      upsertDoc_(d, existing);
+
+      stats.processed++;
+      if (useVision) { budget -= step.pages; stats.pagesUsed += step.pages; }
+      if (step.status === 'ok' || step.status === 'ok-vision') stats.completed++;
+      else if (step.status === 'partial') { stats.partial++; stats.remainingQueue++; }
+      else if (step.status === 'skip-large') stats.skippedLarge++;
+    } catch (e) {
+      stats.errors++;
+      d.ocrStatus = 'error';
+      try { upsertDoc_(d, existing); } catch (e2) {}
+      Logger.log('ocrQueue error ' + d.fileName + ': ' + e);
+    }
+  }
+
+  if (stats.pagesUsed > 0) ocrConsume_(stats.pagesUsed);
+  stats.budgetLeft = ocrBudgetRemaining_();
+  writeLog_('OCR hàng đợi', stats.processed,
+    'Xong ' + stats.completed + ', còn dở ' + stats.partial +
+    ', trang Vision ' + stats.pagesUsed + ', còn chờ ' + stats.remainingQueue);
+  return stats;
+}
+
+/* ===================== Lịch tự động OCR ===================== */
+function installOcrTrigger(hours) {
+  hours = hours || 1;
+  removeOcrTrigger();
+  ScriptApp.newTrigger('ocrQueueJob').timeBased().everyHours(hours).create();
+  return 'Đã bật OCR tự động mỗi ' + hours + ' giờ.';
+}
+function removeOcrTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var n = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'ocrQueueJob') {
+      ScriptApp.deleteTrigger(triggers[i]); n++;
+    }
+  }
+  return n;
+}
+function hasOcrTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'ocrQueueJob') return true;
+  }
+  return false;
+}
+function ocrQueueJob() {
+  ocrQueueRun({});
 }
 
 
@@ -1038,7 +1308,7 @@ function scanDrive(options) {
   getOrCreateDatabase(); // đảm bảo DB tồn tại
   var existing = getExistingIndex_();
 
-  var stats = { scanned: 0, inserted: 0, updated: 0, skipped: 0, ocr: 0, errors: 0, deleted: 0, limitHit: false };
+  var stats = { scanned: 0, inserted: 0, updated: 0, skipped: 0, ocr: 0, queued: 0, errors: 0, deleted: 0, limitHit: false };
   var livingIds = {};
 
   var files = collectFiles_(root, '', []);
@@ -1056,6 +1326,15 @@ function scanDrive(options) {
 
     var changed = !hit || Number(hit.modifiedTime) !== Number(f.modifiedTime);
 
+    // Nếu file không đổi và đã có kết quả OCR (hoặc đang OCR dở), giữ nguyên để không
+    // mất nội dung và không tốn hạn mức - kể cả khi bấm "Quét lại toàn bộ".
+    var preserved = hit && !changed &&
+      ['ok', 'ok-vision', 'partial', 'skip', 'skip-large'].indexOf(hit.ocrStatus) !== -1;
+    if (preserved) {
+      stats.skipped++;
+      continue;
+    }
+
     if (!force && !changed) {
       stats.skipped++;
       continue;
@@ -1069,6 +1348,7 @@ function scanDrive(options) {
       var doc = processFile_(f, existing);
       stats.scanned++;
       if (doc.ocrStatus === 'ok') stats.ocr++;
+      if (doc.ocrStatus === 'pending') stats.queued++;
       if (doc._op === 'inserted') stats.inserted++;
       else stats.updated++;
     } catch (e) {
@@ -1125,8 +1405,19 @@ function collectFiles_(folder, path, acc) {
  * Xử lý 1 file: OCR/đọc nội dung -> phân loại -> trích metadata -> upsert.
  */
 function processFile_(f, existing) {
-  var res = extractContent(f.id, f.mimeType);
-  var content = res.text || '';
+  var isOcrType = OCR_MIME_TYPES.indexOf(f.mimeType) !== -1;
+  var content = '';
+  var ocrStatus, ocrProgress = '';
+
+  if (isOcrType) {
+    // Ảnh/PDF: KHÔNG OCR ngay khi quét (tránh chậm & vượt hạn mức) -> xếp hàng đợi OCR.
+    ocrStatus = 'pending';
+  } else {
+    // Google Docs/Word: đọc text ngay (miễn phí, nhanh).
+    var res = extractContent(f.id, f.mimeType);
+    content = (res.text || '').substring(0, 45000);
+    ocrStatus = res.status;
+  }
 
   var cls = classifyDoc(f.name, content);
   var docNumber = extractDocNumber(f.name, content);
@@ -1142,15 +1433,16 @@ function processFile_(f, existing) {
     docNumber: docNumber,
     issuedDate: issued,
     title: title,
-    content: content.substring(0, 45000), // giới hạn để không vượt ô Sheets (~50k ký tự)
+    content: content,
     folderPath: f.folderPath,
     mimeType: f.mimeType,
     fileUrl: f.url,
     modifiedTime: f.modifiedTime,
     scannedAt: new Date().toISOString(),
-    ocrStatus: res.status,
+    ocrStatus: ocrStatus,
     issuer: issuer.name,
-    issuerLevel: issuer.level
+    issuerLevel: issuer.level,
+    ocrProgress: ocrProgress
   };
   var op = upsertDoc_(doc, existing);
   doc._op = op;
@@ -1380,6 +1672,10 @@ function apiGetStatus() {
     issuerLevels: getIssuerLevels(),
     totalDocs: countDocs_(),
     visionEnabled: hasVisionKey_(),
+    ocrPending: ocrQueueCount(),
+    ocrAuto: hasOcrTrigger(),
+    ocrDailyLimit: getOcrDailyLimit(),
+    ocrUsedToday: ocrUsedToday_(),
     userEmail: Session.getActiveUser().getEmail()
   };
 }
@@ -1486,6 +1782,33 @@ function apiSaveDocTypes(docTypes) {
 function apiResetDocTypes() {
   PropertiesService.getScriptProperties().deleteProperty(PROP_DOC_TYPES);
   return getDocTypes();
+}
+
+/**
+ * Chạy hàng đợi OCR một lượt (xử lý dần vài văn bản).
+ */
+function apiOcrQueueRun() {
+  var stats = ocrQueueRun({});
+  stats.pending = ocrQueueCount();
+  stats.usedToday = ocrUsedToday_();
+  stats.dailyLimit = getOcrDailyLimit();
+  return stats;
+}
+
+/**
+ * Bật/tắt lịch tự động OCR hàng đợi.
+ */
+function apiSetOcrAuto(enable, hours) {
+  if (enable) return { ok: true, message: installOcrTrigger(hours || 1), ocrAuto: true };
+  var n = removeOcrTrigger();
+  return { ok: true, message: 'Đã tắt tự động OCR (' + n + ' trigger).', ocrAuto: false };
+}
+
+/**
+ * Đặt hạn mức số trang OCR (Vision) mỗi ngày.
+ */
+function apiSetOcrLimit(n) {
+  return { ok: true, dailyLimit: setOcrDailyLimit(n) };
 }
 
 /**

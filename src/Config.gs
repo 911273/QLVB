@@ -31,6 +31,44 @@ var VISION_PDF_MAX_PAGES = 5;
 // Không gửi lên Vision nếu file lớn hơn mức này (giới hạn kích thước request ~ dưới 20MB).
 var VISION_MAX_BYTES = 18 * 1024 * 1024;
 
+// ===== Hàng đợi OCR (xử lý dần để tránh vượt hạn mức miễn phí của Google) =====
+var OCR_QUEUE_BATCH_FILES = 5;      // Số văn bản xử lý mỗi lượt chạy hàng đợi.
+var OCR_VISION_PAGES_PER_RUN = 5;   // Số trang OCR mỗi văn bản mỗi lượt (Vision tối đa 5).
+var DEFAULT_OCR_DAILY_LIMIT = 200;  // Hạn mức số trang OCR bằng Vision mỗi ngày (mặc định).
+var PROP_OCR_DAILY_LIMIT = 'OCR_DAILY_LIMIT';
+var PROP_OCR_USED_DATE = 'OCR_USED_DATE';
+var PROP_OCR_USED_COUNT = 'OCR_USED_COUNT';
+
+function getOcrDailyLimit() {
+  var v = parseInt(PropertiesService.getScriptProperties().getProperty(PROP_OCR_DAILY_LIMIT), 10);
+  return (v && v > 0) ? v : DEFAULT_OCR_DAILY_LIMIT;
+}
+function setOcrDailyLimit(n) {
+  n = parseInt(n, 10);
+  if (!n || n < 0) n = DEFAULT_OCR_DAILY_LIMIT;
+  PropertiesService.getScriptProperties().setProperty(PROP_OCR_DAILY_LIMIT, String(n));
+  return getOcrDailyLimit();
+}
+function todayKey_() {
+  return Utilities.formatDate(new Date(), 'Asia/Ho_Chi_Minh', 'yyyy-MM-dd');
+}
+function ocrUsedToday_() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty(PROP_OCR_USED_DATE) !== todayKey_()) return 0;
+  return parseInt(props.getProperty(PROP_OCR_USED_COUNT), 10) || 0;
+}
+function ocrBudgetRemaining_() {
+  return Math.max(0, getOcrDailyLimit() - ocrUsedToday_());
+}
+function ocrConsume_(pages) {
+  if (!pages || pages <= 0) return;
+  var props = PropertiesService.getScriptProperties();
+  var used = (props.getProperty(PROP_OCR_USED_DATE) === todayKey_())
+    ? (parseInt(props.getProperty(PROP_OCR_USED_COUNT), 10) || 0) : 0;
+  props.setProperty(PROP_OCR_USED_DATE, todayKey_());
+  props.setProperty(PROP_OCR_USED_COUNT, String(used + pages));
+}
+
 // Kích thước tối đa (byte) cho phép OCR. File lớn hơn sẽ bị bỏ qua OCR
 // (vì Google OCR dễ thất bại/timeout với PDF scan rất lớn) nhưng VẪN được lập chỉ mục
 // dựa trên tên file. Mặc định 15 MB. PDF nhiều trang nên tách nhỏ để OCR được.

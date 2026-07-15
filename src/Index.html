@@ -131,6 +131,32 @@
           </div>
           <div id="autoStatus" class="muted"></div>
         </div>
+        <div class="card">
+          <h3>Hàng đợi OCR (xử lý dần, tránh vượt hạn mức Google)</h3>
+          <p class="muted">Khi quét, ảnh/PDF được <b>xếp hàng đợi</b> thay vì OCR ngay. Hệ thống OCR từng ít một: mỗi lượt vài văn bản, mỗi PDF vài trang, và giới hạn số trang/ngày để không vượt hạn mức miễn phí của Vision. PDF nhiều trang sẽ được OCR dần qua nhiều lượt.</p>
+          <div id="ocrQueueStatus" class="muted" style="margin-bottom:10px"></div>
+          <div class="form-row">
+            <button class="btn btn-primary" id="btnOcrRun">OCR hàng đợi ngay</button>
+            <label>Giới hạn trang/ngày
+              <input type="number" id="ocrLimit" class="input" style="width:110px" min="0" step="10">
+            </label>
+            <button class="btn" id="btnSaveOcrLimit">Lưu giới hạn</button>
+          </div>
+          <div class="form-row">
+            <label>Tự động OCR
+              <select id="ocrHours" class="input">
+                <option value="1" selected>Mỗi 1 giờ</option>
+                <option value="2">Mỗi 2 giờ</option>
+                <option value="4">Mỗi 4 giờ</option>
+                <option value="6">Mỗi 6 giờ</option>
+                <option value="12">Mỗi 12 giờ</option>
+              </select>
+            </label>
+            <button class="btn btn-primary" id="btnOcrAutoOn">Bật tự động OCR</button>
+            <button class="btn" id="btnOcrAutoOff">Tắt</button>
+          </div>
+          <div id="ocrRunResult" class="scan-result"></div>
+        </div>
       </section>
 
       <!-- TAB: Cài đặt -->

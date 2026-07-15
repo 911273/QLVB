@@ -20,7 +20,7 @@ function scanDrive(options) {
   getOrCreateDatabase(); // đảm bảo DB tồn tại
   var existing = getExistingIndex_();
 
-  var stats = { scanned: 0, inserted: 0, updated: 0, skipped: 0, ocr: 0, errors: 0, deleted: 0, limitHit: false };
+  var stats = { scanned: 0, inserted: 0, updated: 0, skipped: 0, ocr: 0, queued: 0, errors: 0, deleted: 0, limitHit: false };
   var livingIds = {};
 
   var files = collectFiles_(root, '', []);
@@ -38,6 +38,15 @@ function scanDrive(options) {
 
     var changed = !hit || Number(hit.modifiedTime) !== Number(f.modifiedTime);
 
+    // Nếu file không đổi và đã có kết quả OCR (hoặc đang OCR dở), giữ nguyên để không
+    // mất nội dung và không tốn hạn mức - kể cả khi bấm "Quét lại toàn bộ".
+    var preserved = hit && !changed &&
+      ['ok', 'ok-vision', 'partial', 'skip', 'skip-large'].indexOf(hit.ocrStatus) !== -1;
+    if (preserved) {
+      stats.skipped++;
+      continue;
+    }
+
     if (!force && !changed) {
       stats.skipped++;
       continue;
@@ -51,6 +60,7 @@ function scanDrive(options) {
       var doc = processFile_(f, existing);
       stats.scanned++;
       if (doc.ocrStatus === 'ok') stats.ocr++;
+      if (doc.ocrStatus === 'pending') stats.queued++;
       if (doc._op === 'inserted') stats.inserted++;
       else stats.updated++;
     } catch (e) {
@@ -107,8 +117,19 @@ function collectFiles_(folder, path, acc) {
  * Xử lý 1 file: OCR/đọc nội dung -> phân loại -> trích metadata -> upsert.
  */
 function processFile_(f, existing) {
-  var res = extractContent(f.id, f.mimeType);
-  var content = res.text || '';
+  var isOcrType = OCR_MIME_TYPES.indexOf(f.mimeType) !== -1;
+  var content = '';
+  var ocrStatus, ocrProgress = '';
+
+  if (isOcrType) {
+    // Ảnh/PDF: KHÔNG OCR ngay khi quét (tránh chậm & vượt hạn mức) -> xếp hàng đợi OCR.
+    ocrStatus = 'pending';
+  } else {
+    // Google Docs/Word: đọc text ngay (miễn phí, nhanh).
+    var res = extractContent(f.id, f.mimeType);
+    content = (res.text || '').substring(0, 45000);
+    ocrStatus = res.status;
+  }
 
   var cls = classifyDoc(f.name, content);
   var docNumber = extractDocNumber(f.name, content);
@@ -124,15 +145,16 @@ function processFile_(f, existing) {
     docNumber: docNumber,
     issuedDate: issued,
     title: title,
-    content: content.substring(0, 45000), // giới hạn để không vượt ô Sheets (~50k ký tự)
+    content: content,
     folderPath: f.folderPath,
     mimeType: f.mimeType,
     fileUrl: f.url,
     modifiedTime: f.modifiedTime,
     scannedAt: new Date().toISOString(),
-    ocrStatus: res.status,
+    ocrStatus: ocrStatus,
     issuer: issuer.name,
-    issuerLevel: issuer.level
+    issuerLevel: issuer.level,
+    ocrProgress: ocrProgress
   };
   var op = upsertDoc_(doc, existing);
   doc._op = op;

@@ -67,7 +67,7 @@ function bindTabs() {
       if (tab.dataset.tab === 'list') loadList(1);
       if (tab.dataset.tab === 'overview') loadStats();
       if (tab.dataset.tab === 'settings') { renderTypesTable(); renderIssuersTable(); renderVisionStatus(); }
-      if (tab.dataset.tab === 'scan') loadUploadHint();
+      if (tab.dataset.tab === 'scan') { loadUploadHint(); renderOcrQueue(); }
     });
   });
 }
@@ -83,6 +83,10 @@ function bindActions() {
   $('#listType').addEventListener('change', function () { loadList(1); });
   $('#btnAutoOn').addEventListener('click', function () { setAutoScan(true); });
   $('#btnAutoOff').addEventListener('click', function () { setAutoScan(false); });
+  $('#btnOcrRun').addEventListener('click', doOcrRun);
+  $('#btnSaveOcrLimit').addEventListener('click', saveOcrLimit);
+  $('#btnOcrAutoOn').addEventListener('click', function () { setOcrAuto(true); });
+  $('#btnOcrAutoOff').addEventListener('click', function () { setOcrAuto(false); });
   $('#btnAddType').addEventListener('click', addTypeRow);
   $('#btnSaveTypes').addEventListener('click', saveTypes);
   $('#btnResetTypes').addEventListener('click', resetTypes);
@@ -110,6 +114,7 @@ function loadStatus() {
     fillLevelSelect();
     renderSysInfo();
     renderStatCardsFromStatus();
+    renderOcrQueue();
     loadStats();
     showLoading(false);
   }).catch(function (err) {
@@ -274,6 +279,8 @@ function ocrLabel(s) {
   if (s === 'ok') return 'Đã trích xuất';
   if (s === 'ok-vision') return 'OCR nâng cao (Vision)';
   if (s === 'manual') return 'Đã sửa tay';
+  if (s === 'pending') return 'Đang chờ OCR';
+  if (s === 'partial') return 'Đang OCR dở';
   if (s === 'skip') return 'Không OCR';
   if (s === 'skip-large') return 'File quá lớn - bỏ OCR';
   if (s === 'error') return 'Lỗi OCR';
@@ -314,6 +321,17 @@ function addPage(box, label, page, fn, active) {
 }
 
 /* ============ Chi tiết ============ */
+// Nhúng trình xem bản gốc (PDF/ảnh) của Google Drive.
+function previewBlock_(d) {
+  var mt = d.mimeType || '';
+  var isPdf = mt === 'application/pdf';
+  var isImg = mt.indexOf('image/') === 0;
+  if (!isPdf && !isImg) return '';
+  var url = 'https://drive.google.com/file/d/' + encodeURIComponent(d.fileId) + '/preview';
+  return '<h3 style="margin-top:16px">Bản gốc (PDF/ảnh)</h3>' +
+    '<iframe class="doc-preview" src="' + url + '"></iframe>';
+}
+
 function openDetail(fileId) {
   showLoading(true, 'Đang tải chi tiết...');
   call('apiGetDetail', fileId).then(function (d) {
@@ -329,7 +347,7 @@ function openDetail(fileId) {
         row('Ngày ban hành', fmtDate(d.issuedDate)) +
         row('Tên file', esc(d.fileName)) +
         row('Đường dẫn', esc(d.folderPath || '/')) +
-        row('Trạng thái OCR', ocrLabel(d.ocrStatus)) +
+        row('Trạng thái OCR', ocrLabel(d.ocrStatus) + (d.ocrProgress ? ' (' + esc(d.ocrProgress) + ' trang)' : '')) +
         row('Quét lúc', fmtDateTime(d.scannedAt)) +
       '</div>' +
       '<div class="form-row" style="margin-top:14px">' +
@@ -337,8 +355,9 @@ function openDetail(fileId) {
         '<button class="btn" id="btnEditDoc">✎ Sửa thông tin</button>' +
         '<button class="btn" id="btnReOcr">OCR lại</button>' +
       '</div>' +
-      '<h3 style="margin-top:16px">Nội dung trích xuất</h3>' +
-      '<div class="detail-content">' + (d.content ? esc(d.content) : '<i>Chưa có nội dung. Nhấn "OCR lại" để trích xuất, hoặc "Sửa thông tin" để nhập tay.</i>') + '</div>';
+      previewBlock_(d) +
+      '<h3 style="margin-top:16px">Nội dung trích xuất' + (d.ocrProgress ? ' <span class="muted" style="font-weight:normal">(đã OCR ' + esc(d.ocrProgress) + ' trang)</span>' : '') + '</h3>' +
+      '<div class="detail-content">' + (d.content ? esc(d.content) : '<i>Chưa có nội dung OCR. Xem bản gốc phía trên; nội dung sẽ có sau khi hàng đợi OCR xử lý, hoặc bấm "OCR lại" / "Sửa thông tin".</i>') + '</div>';
     $('#modalContent').innerHTML = html;
     $('#modal').classList.remove('hidden');
     var btn = $('#btnReOcr');
@@ -448,13 +467,14 @@ function doScan(force) {
       scanStat('Đã xử lý', s.scanned) +
       scanStat('Thêm mới', s.inserted) +
       scanStat('Cập nhật', s.updated) +
-      scanStat('OCR', s.ocr) +
+      scanStat('Xếp hàng đợi OCR', s.queued) +
       scanStat('Bỏ qua', s.skipped) +
       scanStat('Đã xoá', s.deleted) +
       scanStat('Lỗi', s.errors) +
       (s.limitHit ? '<div class="upload-hint" style="margin-top:10px">Còn văn bản chưa xử lý (giới hạn mỗi lượt). Nhấn <b>Quét ngay</b> lần nữa để tiếp tục.</div>' : '');
-    toast('Quét xong: +' + s.inserted + ' mới, ' + s.updated + ' cập nhật.', 'ok');
+    toast('Quét xong: +' + s.inserted + ' mới, ' + s.updated + ' cập nhật, ' + s.queued + ' chờ OCR.', 'ok');
     loadStatus();
+    renderOcrQueue();
   }).catch(function (err) { showLoading(false); toast('Lỗi quét: ' + (err.message || err), 'err'); });
 }
 function scanStat(lbl, num) {
@@ -474,6 +494,66 @@ function setAutoScan(enable) {
     })
     .withFailureHandler(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); })
     .apiSetAutoScan(enable, hours);
+}
+
+/* ============ Hàng đợi OCR ============ */
+function renderOcrQueue() {
+  var st = STATE.status || {};
+  var box = $('#ocrQueueStatus');
+  if (!box) return;
+  var engine = st.visionEnabled ? 'Vision (giới hạn theo trang/ngày)' : 'Drive OCR (miễn phí, chất lượng cơ bản)';
+  box.innerHTML =
+    'Đang chờ OCR: <b>' + (st.ocrPending || 0) + '</b> văn bản &nbsp;•&nbsp; ' +
+    'Động cơ: <b>' + engine + '</b><br>' +
+    'Đã dùng hôm nay: <b>' + (st.ocrUsedToday || 0) + '</b> / ' + (st.ocrDailyLimit || 0) + ' trang (Vision) &nbsp;•&nbsp; ' +
+    'Tự động OCR: ' + (st.ocrAuto ? '<span class="tag ok">Đang bật</span>' : '<span class="tag skip">Tắt</span>');
+  if ($('#ocrLimit')) $('#ocrLimit').value = st.ocrDailyLimit || 0;
+}
+
+function doOcrRun() {
+  if (!STATE.status || !STATE.status.initialized) { toast('Hãy khởi tạo hệ thống trước.', 'err'); return; }
+  showLoading(true, 'Đang OCR hàng đợi...');
+  call('apiOcrQueueRun').then(function (s) {
+    showLoading(false);
+    $('#ocrRunResult').innerHTML =
+      '<div class="muted" style="margin-bottom:6px">Kết quả OCR lượt này:</div>' +
+      scanStat('Đã xử lý', s.processed) +
+      scanStat('Hoàn tất', s.completed) +
+      scanStat('Còn dở (nhiều trang)', s.partial) +
+      scanStat('Trang Vision đã dùng', s.pagesUsed) +
+      scanStat('File quá lớn', s.skippedLarge) +
+      scanStat('Lỗi', s.errors) +
+      scanStat('Còn chờ', s.pending) +
+      (s.usedVision && s.budgetLeft <= 0 ? '<div class="upload-hint" style="margin-top:10px">Đã đạt hạn mức trang/ngày. Hệ thống sẽ OCR tiếp vào ngày mai, hoặc tăng giới hạn nếu bạn có hạn mức Vision cao hơn.</div>' : '') +
+      (s.pending > 0 ? '<div class="upload-hint" style="margin-top:10px">Còn <b>' + s.pending + '</b> văn bản trong hàng đợi. Bấm lại "OCR hàng đợi ngay" hoặc bật tự động OCR để xử lý dần.</div>' : '');
+    toast('OCR xong lượt này: hoàn tất ' + s.completed + ', còn chờ ' + s.pending + '.', 'ok');
+    loadStatus();
+  }).catch(function (err) { showLoading(false); toast('Lỗi OCR: ' + (err.message || err), 'err'); });
+}
+
+function saveOcrLimit() {
+  var n = parseInt($('#ocrLimit').value, 10);
+  showLoading(true, 'Đang lưu giới hạn...');
+  call('apiSetOcrLimit', n).then(function (r) {
+    showLoading(false);
+    if (STATE.status) STATE.status.ocrDailyLimit = r.dailyLimit;
+    renderOcrQueue();
+    toast('Đã đặt giới hạn ' + r.dailyLimit + ' trang/ngày.', 'ok');
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+function setOcrAuto(enable) {
+  var hours = parseInt($('#ocrHours').value, 10);
+  showLoading(true, 'Đang cập nhật lịch OCR...');
+  google.script.run
+    .withSuccessHandler(function (r) {
+      showLoading(false);
+      toast(r.message, 'ok');
+      loadStatus();
+      setTimeout(renderOcrQueue, 300);
+    })
+    .withFailureHandler(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); })
+    .apiSetOcrAuto(enable, hours);
 }
 
 /* ============ Cài đặt ============ */

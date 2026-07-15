@@ -99,12 +99,10 @@ function convertToDocAndRead_(fileId, mimeType, unused) {
 }
 
 /**
- * OCR lại 1 file theo yêu cầu từ giao diện (chạy lại OCR & cập nhật DB).
+ * OCR lại 1 file theo yêu cầu từ giao diện: đặt lại về hàng đợi và OCR ngay 1 bước
+ * (với PDF nhiều trang sẽ OCR cụm trang đầu; các trang còn lại do hàng đợi nền OCR tiếp).
  */
 function reOcrDoc(fileId) {
-  var file = DriveApp.getFileById(fileId);
-  var mimeType = file.getMimeType();
-  var res = extractContent(fileId, mimeType);
   var docs = readAllDocs();
   var existing = getExistingIndex_();
   var current = null;
@@ -113,14 +111,20 @@ function reOcrDoc(fileId) {
   }
   if (!current) throw new Error('Không tìm thấy văn bản trong CSDL.');
 
-  current.content = res.text;
-  current.ocrStatus = res.status;
-  current.title = extractTitle(current.fileName, res.text) || current.title;
-  if (!current.docNumber) current.docNumber = extractDocNumber(current.fileName, res.text);
-  if (!current.issuer) {
-    var iss = detectIssuer_(current.fileName, res.text);
-    current.issuer = iss.name;
-    current.issuerLevel = iss.level;
+  // Đặt lại nội dung & tiến độ để OCR lại từ đầu.
+  current.content = '';
+  current.ocrProgress = '';
+  current.ocrStatus = 'pending';
+
+  var step = ocrOneStep_(current, ocrBudgetRemaining_());
+  if (step && !step.skip) {
+    current.content = step.content;
+    current.ocrStatus = step.status;
+    current.ocrProgress = step.progress || '';
+    if (step.pages) ocrConsume_(step.pages);
+    if (step.done && (step.status === 'ok' || step.status === 'ok-vision')) {
+      finalizeDocAfterOcr_(current);
+    }
   }
   current.scannedAt = new Date().toISOString();
   upsertDoc_(current, existing);
