@@ -174,19 +174,30 @@ function apiGetStatus(acc) {
     } catch (e) { dbFile = null; }
   }
 
+  // Lấy danh sách trigger 1 lần cho cả 2 kiểm tra (nhanh hơn gọi getProjectTriggers 2 lần).
+  var hasAuto = false, hasOcr = false;
+  try {
+    var triggers = ScriptApp.getProjectTriggers();
+    for (var t = 0; t < triggers.length; t++) {
+      var h = triggers[t].getHandlerFunction();
+      if (h === 'autoScanJob') hasAuto = true;
+      else if (h === 'ocrQueueJob') hasOcr = true;
+    }
+  } catch (e) {}
+
   return {
     initialized: !!(rootId && dbId),
     rootFolder: rootFolder,
     database: dbFile,
     lastScan: lastScan,
-    autoScan: hasAutoScanTrigger(),
+    autoScan: hasAuto,
     docTypes: getDocTypes(),
     issuers: getIssuers(),
     issuerLevels: getIssuerLevels(),
     totalDocs: countDocs_(),
     visionEnabled: hasVisionKey_(),
     ocrPending: ocrQueueCount(),
-    ocrAuto: hasOcrTrigger(),
+    ocrAuto: hasOcr,
     ocrDailyLimit: getOcrDailyLimit(),
     ocrUsedToday: ocrUsedToday_(),
     userEmail: (acc ? acc.email : Session.getActiveUser().getEmail()),
@@ -237,21 +248,33 @@ function apiGetDetail(fileId) {
  * Thống kê theo loại VB và theo năm (cho trang tổng quan).
  */
 function apiGetStats() {
-  var docs = readAllDocs();
   var byType = {};
   var byYear = {};
   var byLevel = {};
   var typeNames = {};
   getDocTypes().forEach(function (t) { typeNames[t.code] = t.name; });
 
-  docs.forEach(function (d) {
-    var code = d.docTypeCode || 'KHAC';
-    byType[code] = (byType[code] || 0) + 1;
-    var year = (d.issuedDate || '').substring(0, 4) || 'Không rõ';
-    byYear[year] = (byYear[year] || 0) + 1;
-    var level = d.issuerLevel || 'Chưa rõ';
-    byLevel[level] = (byLevel[level] || 0) + 1;
-  });
+  // Chỉ đọc 3 cột cần thiết (mã loại, ngày ban hành, cấp) -> không đọc cột nội dung nặng.
+  var sheet = getDocsSheet_();
+  var lastRow = sheet.getLastRow();
+  var totalDocs = Math.max(0, lastRow - 1);
+  if (lastRow >= 2) {
+    var n = lastRow - 1;
+    var codes = sheet.getRange(2, COLS.DOC_TYPE_CODE + 1, n, 1).getValues();
+    var dates = sheet.getRange(2, COLS.ISSUED_DATE + 1, n, 1).getValues();
+    var levels = sheet.getRange(2, COLS.ISSUER_LEVEL + 1, n, 1).getValues();
+    for (var i = 0; i < n; i++) {
+      var code = codes[i][0] || 'KHAC';
+      byType[code] = (byType[code] || 0) + 1;
+      var dv = dates[i][0];
+      var year = (dv instanceof Date) ? String(dv.getFullYear())
+        : ((String(dv || '').substring(0, 4)) || 'Không rõ');
+      if (!year) year = 'Không rõ';
+      byYear[year] = (byYear[year] || 0) + 1;
+      var level = levels[i][0] || 'Chưa rõ';
+      byLevel[level] = (byLevel[level] || 0) + 1;
+    }
+  }
 
   var typeStats = Object.keys(byType).map(function (code) {
     return { code: code, name: typeNames[code] || (code === 'KHAC' ? 'Khác' : code), count: byType[code] };
@@ -265,7 +288,7 @@ function apiGetStats() {
     return { level: l, count: byLevel[l] };
   }).sort(function (a, b) { return b.count - a.count; });
 
-  return { total: docs.length, byType: typeStats, byYear: yearStats, byLevel: levelStats };
+  return { total: totalDocs, byType: typeStats, byYear: yearStats, byLevel: levelStats };
 }
 
 /**

@@ -103,13 +103,9 @@ function convertToDocAndRead_(fileId, mimeType, unused) {
  * (với PDF nhiều trang sẽ OCR cụm trang đầu; các trang còn lại do hàng đợi nền OCR tiếp).
  */
 function reOcrDoc(fileId) {
-  var docs = readAllDocs();
-  var existing = getExistingIndex_();
-  var current = null;
-  for (var i = 0; i < docs.length; i++) {
-    if (docs[i].fileId === fileId) { current = docs[i]; break; }
-  }
+  var current = getDocDetailFast_(fileId);
   if (!current) throw new Error('Không tìm thấy văn bản trong CSDL.');
+  var existing = getExistingIndex_();
 
   // Đặt lại nội dung & tiến độ để OCR lại từ đầu.
   current.content = '';

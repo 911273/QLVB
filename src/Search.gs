@@ -113,9 +113,5 @@ function makeSnippet_(content, terms) {
  * Lấy chi tiết 1 văn bản (kèm full content).
  */
 function getDocDetail(fileId) {
-  var docs = readAllDocs();
-  for (var i = 0; i < docs.length; i++) {
-    if (docs[i].fileId === fileId) return docs[i];
-  }
-  return null;
+  return getDocDetailFast_(fileId); // đọc đúng 1 dòng thay vì toàn bộ CSDL -> mở văn bản nhanh
 }

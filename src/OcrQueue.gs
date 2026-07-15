@@ -19,12 +19,20 @@ function needsOcr_(d) {
   return d.ocrStatus === 'pending' || d.ocrStatus === 'partial';
 }
 
-// Đếm số văn bản đang chờ OCR.
+// Đếm số văn bản đang chờ OCR (chỉ đọc cột MimeType & OCR, không đọc nội dung -> nhanh).
 function ocrQueueCount() {
-  var docs = readAllDocs();
-  var n = 0;
-  for (var i = 0; i < docs.length; i++) if (needsOcr_(docs[i])) n++;
-  return n;
+  var sheet = getDocsSheet_();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+  var n = lastRow - 1;
+  var mimes = sheet.getRange(2, COLS.MIME_TYPE + 1, n, 1).getValues();
+  var stat = sheet.getRange(2, COLS.OCR_STATUS + 1, n, 1).getValues();
+  var c = 0;
+  for (var i = 0; i < n; i++) {
+    var st = stat[i][0];
+    if ((st === 'pending' || st === 'partial') && OCR_MIME_TYPES.indexOf(mimes[i][0]) !== -1) c++;
+  }
+  return c;
 }
 
 function parseProgress_(s) {

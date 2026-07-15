@@ -295,8 +295,11 @@ function getExistingRootFolder_() {
 
 /**
  * Trả về Spreadsheet database; tự tạo nếu chưa có.
+ * Ghi nhớ trong 1 lần chạy (execution) để tránh mở lại + kiểm tra sheet nhiều lần -> nhanh hơn.
  */
+var _dbCache = null;
 function getOrCreateDatabase() {
+  if (_dbCache) return _dbCache;
   var props = PropertiesService.getScriptProperties();
   var id = props.getProperty(PROP_DB_SPREADSHEET_ID);
   var ss;
@@ -320,6 +323,7 @@ function getOrCreateDatabase() {
   }
   ensureSheets_(ss);
   migrateIssuedDates_(ss); // chuyển ngày cũ (dạng chữ) sang ngày thật để hiển thị dd/mm/yyyy
+  _dbCache = ss;
   return ss;
 }
 
@@ -376,11 +380,15 @@ function ensureSheets_(ss) {
           .setBackground('#0B5394').setFontColor('#ffffff');
     }
   }
-  // Định dạng cột "Ngày ban hành" hiển thị dd/mm/yyyy (áp dụng cho toàn cột).
-  try {
-    docs.getRange(2, COLS.ISSUED_DATE + 1, Math.max(1, docs.getMaxRows() - 1), 1)
-        .setNumberFormat('dd/mm/yyyy');
-  } catch (e) { /* bỏ qua nếu không đặt được */ }
+  // Định dạng cột "Ngày ban hành" dd/mm/yyyy — chỉ chạy MỘT LẦN (tránh ghi lại mỗi lời gọi -> chậm).
+  var props0 = PropertiesService.getScriptProperties();
+  if (!props0.getProperty('DATE_COL_FMT_V1')) {
+    try {
+      docs.getRange(2, COLS.ISSUED_DATE + 1, Math.max(1, docs.getMaxRows() - 1), 1)
+          .setNumberFormat('dd/mm/yyyy');
+    } catch (e) { /* bỏ qua */ }
+    props0.setProperty('DATE_COL_FMT_V1', '1');
+  }
   // Sheet NhatKy
   var log = ss.getSheetByName(DB_SHEET_LOG);
   if (!log) {
@@ -404,6 +412,25 @@ function readAllDocs() {
   if (lastRow < 2) return [];
   var values = sheet.getRange(2, 1, lastRow - 1, DB_HEADERS.length).getValues();
   return values.map(rowToObj_);
+}
+
+/**
+ * Lấy chi tiết 1 văn bản NHANH: chỉ đọc cột FileId để tìm dòng, rồi đọc đúng 1 dòng đó
+ * (không đọc toàn bộ cột nội dung của tất cả văn bản như readAllDocs).
+ */
+function getDocDetailFast_(fileId) {
+  if (!fileId) return null;
+  var sheet = getDocsSheet_();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+  var ids = sheet.getRange(2, COLS.FILE_ID + 1, lastRow - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) === String(fileId)) {
+      var r = sheet.getRange(i + 2, 1, 1, DB_HEADERS.length).getValues()[0];
+      return rowToObj_(r);
+    }
+  }
+  return null;
 }
 
 // Ép ô về chuỗi "sạch" để google.script.run tuần tự hoá được (tránh trả null).
@@ -450,12 +477,16 @@ function getExistingIndex_() {
   var lastRow = sheet.getLastRow();
   var map = {};
   if (lastRow < 2) return map;
-  var values = sheet.getRange(2, 1, lastRow - 1, DB_HEADERS.length).getValues();
-  for (var i = 0; i < values.length; i++) {
-    map[values[i][COLS.FILE_ID]] = {
+  // Chỉ đọc cột FileId và nhóm cột MODIFIED_TIME..OCR_STATUS -> KHÔNG đọc cột nội dung nặng.
+  var n = lastRow - 1;
+  var ids = sheet.getRange(2, COLS.FILE_ID + 1, n, 1).getValues();
+  var meta = sheet.getRange(2, COLS.MODIFIED_TIME + 1, n, COLS.OCR_STATUS - COLS.MODIFIED_TIME + 1).getValues();
+  var mOff = 0, oOff = COLS.OCR_STATUS - COLS.MODIFIED_TIME;
+  for (var i = 0; i < ids.length; i++) {
+    map[ids[i][0]] = {
       rowIndex: i + 2,
-      modifiedTime: values[i][COLS.MODIFIED_TIME],
-      ocrStatus: values[i][COLS.OCR_STATUS]
+      modifiedTime: meta[i][mOff],
+      ocrStatus: meta[i][oOff]
     };
   }
   return map;
@@ -536,13 +567,9 @@ function removeDeletedDocs_(livingIds) {
  */
 function updateDocManual(p) {
   if (!p || !p.fileId) throw new Error('Thiếu mã văn bản (fileId).');
-  var docs = readAllDocs();
-  var existing = getExistingIndex_();
-  var cur = null;
-  for (var i = 0; i < docs.length; i++) {
-    if (docs[i].fileId === p.fileId) { cur = docs[i]; break; }
-  }
+  var cur = getDocDetailFast_(p.fileId);
   if (!cur) throw new Error('Không tìm thấy văn bản trong cơ sở dữ liệu.');
+  var existing = getExistingIndex_();
 
   if (p.docTypeCode != null && p.docTypeCode !== '') {
     cur.docTypeCode = p.docTypeCode;
@@ -1089,13 +1116,9 @@ function convertToDocAndRead_(fileId, mimeType, unused) {
  * (với PDF nhiều trang sẽ OCR cụm trang đầu; các trang còn lại do hàng đợi nền OCR tiếp).
  */
 function reOcrDoc(fileId) {
-  var docs = readAllDocs();
-  var existing = getExistingIndex_();
-  var current = null;
-  for (var i = 0; i < docs.length; i++) {
-    if (docs[i].fileId === fileId) { current = docs[i]; break; }
-  }
+  var current = getDocDetailFast_(fileId);
   if (!current) throw new Error('Không tìm thấy văn bản trong CSDL.');
+  var existing = getExistingIndex_();
 
   // Đặt lại nội dung & tiến độ để OCR lại từ đầu.
   current.content = '';
@@ -1141,12 +1164,20 @@ function needsOcr_(d) {
   return d.ocrStatus === 'pending' || d.ocrStatus === 'partial';
 }
 
-// Đếm số văn bản đang chờ OCR.
+// Đếm số văn bản đang chờ OCR (chỉ đọc cột MimeType & OCR, không đọc nội dung -> nhanh).
 function ocrQueueCount() {
-  var docs = readAllDocs();
-  var n = 0;
-  for (var i = 0; i < docs.length; i++) if (needsOcr_(docs[i])) n++;
-  return n;
+  var sheet = getDocsSheet_();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+  var n = lastRow - 1;
+  var mimes = sheet.getRange(2, COLS.MIME_TYPE + 1, n, 1).getValues();
+  var stat = sheet.getRange(2, COLS.OCR_STATUS + 1, n, 1).getValues();
+  var c = 0;
+  for (var i = 0; i < n; i++) {
+    var st = stat[i][0];
+    if ((st === 'pending' || st === 'partial') && OCR_MIME_TYPES.indexOf(mimes[i][0]) !== -1) c++;
+  }
+  return c;
 }
 
 function parseProgress_(s) {
@@ -1637,11 +1668,7 @@ function makeSnippet_(content, terms) {
  * Lấy chi tiết 1 văn bản (kèm full content).
  */
 function getDocDetail(fileId) {
-  var docs = readAllDocs();
-  for (var i = 0; i < docs.length; i++) {
-    if (docs[i].fileId === fileId) return docs[i];
-  }
-  return null;
+  return getDocDetailFast_(fileId); // đọc đúng 1 dòng thay vì toàn bộ CSDL -> mở văn bản nhanh
 }
 
 
@@ -2101,19 +2128,30 @@ function apiGetStatus(acc) {
     } catch (e) { dbFile = null; }
   }
 
+  // Lấy danh sách trigger 1 lần cho cả 2 kiểm tra (nhanh hơn gọi getProjectTriggers 2 lần).
+  var hasAuto = false, hasOcr = false;
+  try {
+    var triggers = ScriptApp.getProjectTriggers();
+    for (var t = 0; t < triggers.length; t++) {
+      var h = triggers[t].getHandlerFunction();
+      if (h === 'autoScanJob') hasAuto = true;
+      else if (h === 'ocrQueueJob') hasOcr = true;
+    }
+  } catch (e) {}
+
   return {
     initialized: !!(rootId && dbId),
     rootFolder: rootFolder,
     database: dbFile,
     lastScan: lastScan,
-    autoScan: hasAutoScanTrigger(),
+    autoScan: hasAuto,
     docTypes: getDocTypes(),
     issuers: getIssuers(),
     issuerLevels: getIssuerLevels(),
     totalDocs: countDocs_(),
     visionEnabled: hasVisionKey_(),
     ocrPending: ocrQueueCount(),
-    ocrAuto: hasOcrTrigger(),
+    ocrAuto: hasOcr,
     ocrDailyLimit: getOcrDailyLimit(),
     ocrUsedToday: ocrUsedToday_(),
     userEmail: (acc ? acc.email : Session.getActiveUser().getEmail()),
@@ -2164,21 +2202,33 @@ function apiGetDetail(fileId) {
  * Thống kê theo loại VB và theo năm (cho trang tổng quan).
  */
 function apiGetStats() {
-  var docs = readAllDocs();
   var byType = {};
   var byYear = {};
   var byLevel = {};
   var typeNames = {};
   getDocTypes().forEach(function (t) { typeNames[t.code] = t.name; });
 
-  docs.forEach(function (d) {
-    var code = d.docTypeCode || 'KHAC';
-    byType[code] = (byType[code] || 0) + 1;
-    var year = (d.issuedDate || '').substring(0, 4) || 'Không rõ';
-    byYear[year] = (byYear[year] || 0) + 1;
-    var level = d.issuerLevel || 'Chưa rõ';
-    byLevel[level] = (byLevel[level] || 0) + 1;
-  });
+  // Chỉ đọc 3 cột cần thiết (mã loại, ngày ban hành, cấp) -> không đọc cột nội dung nặng.
+  var sheet = getDocsSheet_();
+  var lastRow = sheet.getLastRow();
+  var totalDocs = Math.max(0, lastRow - 1);
+  if (lastRow >= 2) {
+    var n = lastRow - 1;
+    var codes = sheet.getRange(2, COLS.DOC_TYPE_CODE + 1, n, 1).getValues();
+    var dates = sheet.getRange(2, COLS.ISSUED_DATE + 1, n, 1).getValues();
+    var levels = sheet.getRange(2, COLS.ISSUER_LEVEL + 1, n, 1).getValues();
+    for (var i = 0; i < n; i++) {
+      var code = codes[i][0] || 'KHAC';
+      byType[code] = (byType[code] || 0) + 1;
+      var dv = dates[i][0];
+      var year = (dv instanceof Date) ? String(dv.getFullYear())
+        : ((String(dv || '').substring(0, 4)) || 'Không rõ');
+      if (!year) year = 'Không rõ';
+      byYear[year] = (byYear[year] || 0) + 1;
+      var level = levels[i][0] || 'Chưa rõ';
+      byLevel[level] = (byLevel[level] || 0) + 1;
+    }
+  }
 
   var typeStats = Object.keys(byType).map(function (code) {
     return { code: code, name: typeNames[code] || (code === 'KHAC' ? 'Khác' : code), count: byType[code] };
@@ -2192,7 +2242,7 @@ function apiGetStats() {
     return { level: l, count: byLevel[l] };
   }).sort(function (a, b) { return b.count - a.count; });
 
-  return { total: docs.length, byType: typeStats, byYear: yearStats, byLevel: levelStats };
+  return { total: totalDocs, byType: typeStats, byYear: yearStats, byLevel: levelStats };
 }
 
 /**
