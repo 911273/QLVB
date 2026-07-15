@@ -95,7 +95,7 @@ function include(filename) {
 var METHOD_PERM = {
   login: 'PUBLIC',
   getStatus: null, changePassword: null, logout: null,
-  search: 'view', getDetail: 'view', getStats: 'view', getUploadInfo: 'view',
+  search: 'view', getDetail: 'view', getStats: 'view', getUploadInfo: 'view', findDuplicates: 'view',
   updateDoc: 'edit', reOcr: 'edit', deleteDoc: 'delete',
   scan: 'scan', ocrQueueRun: 'scan', setOcrAuto: 'scan', setOcrLimit: 'scan', setAutoScan: 'scan',
   saveDocTypes: 'config', resetDocTypes: 'config', saveIssuers: 'config', resetIssuers: 'config',
@@ -124,6 +124,7 @@ function apiDispatch(token, method, payload) {
     case 'search':       return searchDocs(payload);
     case 'getDetail':    return getDocDetail(payload.fileId);
     case 'getStats':     return apiGetStats();
+    case 'findDuplicates': return findDuplicates();
     case 'getUploadInfo': return apiGetUploadInfo();
     case 'updateDoc':    return updateDocManual(payload);
     case 'reOcr':        return reOcrDoc(payload.fileId);
@@ -200,6 +201,7 @@ function apiGetStatus(acc) {
     ocrAuto: hasOcr,
     ocrDailyLimit: getOcrDailyLimit(),
     ocrUsedToday: ocrUsedToday_(),
+    duplicates: getDuplicateCount_(),
     userEmail: (acc ? acc.email : Session.getActiveUser().getEmail()),
     me: (acc ? publicAccount_(acc) : null)
   };

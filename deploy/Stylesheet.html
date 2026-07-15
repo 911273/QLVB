@@ -219,6 +219,15 @@
 
   .empty { text-align: center; color: var(--muted); padding: 40px 0; }
 
+  /* Nhóm trùng lặp */
+  .dup-group { border: 1px solid #f3b9b6; border-radius: 10px; padding: 10px 12px; margin-top: 12px; background: #fffafa; }
+  .dup-head { font-weight: 600; color: var(--err); margin-bottom: 8px; font-size: 13px; }
+  .dup-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px dashed var(--border); }
+  .dup-item:first-of-type { border-top: none; }
+  .dup-info { flex: 1; min-width: 0; }
+  .dup-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+  @media (max-width: 640px){ .dup-item { flex-wrap: wrap; } .dup-actions { flex: 1 1 100%; } .dup-actions .btn { flex: 1; } }
+
   /* Scan */
   .scan-result { margin-top: 14px; }
   .scan-stat { display: inline-block; margin: 6px 14px 0 0; font-size: 13px; }

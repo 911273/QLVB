@@ -75,6 +75,7 @@ function scanDrive(options) {
   }
 
   PropertiesService.getScriptProperties().setProperty(PROP_LAST_SCAN, new Date().toISOString());
+  stats.duplicates = refreshDuplicateCount_(); // tự động rà soát trùng lặp (nhanh) sau khi quét
   writeLog_('Quét Drive', stats.scanned,
     'Thêm ' + stats.inserted + ', Cập nhật ' + stats.updated +
     ', OCR ' + stats.ocr + ', Xoá ' + stats.deleted +

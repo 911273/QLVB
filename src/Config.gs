@@ -10,6 +10,7 @@
 var PROP_ROOT_FOLDER_ID = 'ROOT_FOLDER_ID';   // Folder gốc chứa văn bản trên Drive
 var PROP_DB_SPREADSHEET_ID = 'DB_SPREADSHEET_ID'; // Spreadsheet dùng làm database
 var PROP_LAST_SCAN = 'LAST_SCAN_AT';          // Thời điểm quét gần nhất
+var PROP_DUP_COUNT = 'DUP_DOCS_COUNT';        // Số văn bản nghi trùng lặp (cập nhật sau mỗi lần quét)
 var PROP_DOC_TYPES = 'DOC_TYPES_JSON';        // Danh sách loại VB (JSON) - có thể tuỳ biến
 
 // Tên mặc định

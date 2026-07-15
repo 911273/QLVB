@@ -170,7 +170,7 @@ function bindTabs() {
       if (tab.dataset.tab === 'list') loadList(1);
       if (tab.dataset.tab === 'overview') loadStats();
       if (tab.dataset.tab === 'settings') { renderTypesTable(); renderIssuersTable(); renderVisionStatus(); renderAccounts(); }
-      if (tab.dataset.tab === 'scan') { loadUploadHint(); renderOcrQueue(); }
+      if (tab.dataset.tab === 'scan') { loadUploadHint(); renderOcrQueue(); renderDupStatus(); }
     });
   });
 }
@@ -197,6 +197,7 @@ function bindActions() {
   $('#btnAutoOn').addEventListener('click', function () { setAutoScan(true); });
   $('#btnAutoOff').addEventListener('click', function () { setAutoScan(false); });
   $('#btnOcrRun').addEventListener('click', doOcrRun);
+  $('#btnFindDup').addEventListener('click', doFindDuplicates);
   $('#btnSaveOcrLimit').addEventListener('click', saveOcrLimit);
   $('#btnOcrAutoOn').addEventListener('click', function () { setOcrAuto(true); });
   $('#btnOcrAutoOff').addEventListener('click', function () { setOcrAuto(false); });
@@ -717,11 +718,13 @@ function doScan(force) {
       scanStat('Xếp hàng đợi OCR', s.queued) +
       scanStat('Bỏ qua', s.skipped) +
       scanStat('Đã xoá', s.deleted) +
+      scanStat('Nghi trùng', s.duplicates) +
       scanStat('Lỗi', s.errors) +
       (s.limitHit ? '<div class="upload-hint" style="margin-top:10px">Còn văn bản chưa xử lý (giới hạn mỗi lượt). Nhấn <b>Quét ngay</b> lần nữa để tiếp tục.</div>' : '');
     toast('Quét xong: +' + s.inserted + ' mới, ' + s.updated + ' cập nhật, ' + s.queued + ' chờ OCR.', 'ok');
     loadStatus();
     renderOcrQueue();
+    setTimeout(renderDupStatus, 400);
   }).catch(function (err) { showLoading(false); toast('Lỗi quét: ' + (err.message || err), 'err'); });
 }
 function scanStat(lbl, num) {
@@ -737,6 +740,68 @@ function setAutoScan(enable) {
     $('#autoStatus').innerHTML = r.autoScan ? 'Trạng thái: <b>Đang bật</b>' : 'Trạng thái: <b>Đã tắt</b>';
     loadStatus();
   }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+/* ============ Kiểm tra trùng lặp ============ */
+function renderDupStatus() {
+  var box = $('#dupStatus'); if (!box) return;
+  var st = STATE.status || {};
+  var n = st.duplicates || 0;
+  box.innerHTML = n > 0
+    ? '<span class="tag error">Nghi trùng: ' + n + ' văn bản</span> — bấm "Rà soát trùng lặp" để xem chi tiết.'
+    : '<span class="tag ok">Chưa phát hiện trùng lặp</span> (theo lần quét gần nhất).';
+}
+function doFindDuplicates() {
+  if (!STATE.status || !STATE.status.initialized) { toast('Hãy khởi tạo hệ thống trước.', 'err'); return; }
+  showLoading(true, 'Đang rà soát trùng lặp...');
+  call('findDuplicates').then(function (res) {
+    showLoading(false);
+    if (STATE.status) STATE.status.duplicates = res.docsAffected;
+    renderDupStatus();
+    renderDupGroups(res);
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+function renderDupGroups(res) {
+  var box = $('#dupResult');
+  if (!res.groups || !res.groups.length) {
+    box.innerHTML = '<div class="empty" style="padding:20px 0">Không phát hiện văn bản trùng lặp. 🎉</div>';
+    return;
+  }
+  var html = '<div class="muted" style="margin:10px 0 6px">Tìm thấy <b>' + res.total + '</b> nhóm nghi trùng (' + res.docsAffected + ' văn bản):</div>';
+  res.groups.forEach(function (g, gi) {
+    html += '<div class="dup-group">' +
+      '<div class="dup-head">Nhóm ' + (gi + 1) + ' — <span class="tag error">' + esc(g.reason) + '</span> (' + g.docs.length + ' VB)</div>';
+    g.docs.forEach(function (d) {
+      html += '<div class="dup-item">' +
+        '<div class="dup-info"><b>' + esc(d.title || d.fileName) + '</b>' +
+          '<div class="muted" style="font-size:12px">' +
+            (d.docNumber ? 'Số: ' + esc(d.docNumber) + ' • ' : '') +
+            'Ngày: ' + fmtDate(d.issuedDate) + ' • ' + esc(d.fileName) +
+          '</div></div>' +
+        '<div class="dup-actions">' +
+          '<button class="btn" data-dup-view="' + esc(d.fileId) + '">Xem</button>' +
+          (can('delete') ? '<button class="btn btn-danger" data-dup-del="' + esc(d.fileId) + '" data-name="' + esc(d.title || d.fileName) + '">Xoá</button>' : '') +
+        '</div></div>';
+    });
+    html += '</div>';
+  });
+  box.innerHTML = html;
+  $all('[data-dup-view]', box).forEach(function (b) {
+    b.addEventListener('click', function () { openDetail(b.getAttribute('data-dup-view')); });
+  });
+  $all('[data-dup-del]', box).forEach(function (b) {
+    b.addEventListener('click', function () {
+      openConfirm_('Xoá văn bản "' + b.getAttribute('data-name') + '"?\n\nFile sẽ vào Thùng rác Drive và gỡ khỏi danh sách.', function () {
+        showLoading(true, 'Đang xoá...');
+        call('deleteDoc', { fileId: b.getAttribute('data-dup-del'), trashFile: true }).then(function () {
+          showLoading(false);
+          toast('Đã xoá. Đang rà soát lại...', 'ok');
+          doFindDuplicates();
+          loadStatus();
+        }).catch(function (err) { showLoading(false); toast('Lỗi xoá: ' + (err.message || err), 'err'); });
+      });
+    });
+  });
 }
 
 /* ============ Hàng đợi OCR ============ */
