@@ -57,6 +57,26 @@ function fmtDateTime(iso) {
   if (!iso) return 'Chưa quét';
   try { return new Date(iso).toLocaleString('vi-VN'); } catch (e) { return iso; }
 }
+// 'yyyy-MM-dd' -> 'dd/mm/yyyy' (cho ô nhập)
+function isoToDmy(iso) {
+  if (!iso) return '';
+  var p = String(iso).substring(0, 10).split('-');
+  if (p.length === 3) return p[2] + '/' + p[1] + '/' + p[0];
+  return '';
+}
+// 'dd/mm/yyyy' (hoặc d/m/yyyy) -> 'yyyy-MM-dd'; chấp nhận rỗng.
+function dmyToIso(s) {
+  s = (s || '').trim();
+  if (!s) return '';
+  var m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (m) {
+    var pad = function (x) { x = parseInt(x, 10); return x < 10 ? '0' + x : '' + x; };
+    return m[3] + '-' + pad(m[2]) + '-' + pad(m[1]);
+  }
+  // đã là yyyy-mm-dd thì giữ nguyên
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(s)) return s;
+  return '';
+}
 
 /* ============ Khởi động ============ */
 document.addEventListener('DOMContentLoaded', function () {
@@ -131,6 +151,8 @@ function bindActions() {
   $('#sKeyword').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
   $('#sIssuer').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
   $('#sNumber').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
+  $('#sFrom').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
+  $('#sTo').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
   // Đổi bộ lọc là tự tìm lại ngay.
   ['sType', 'sLevel', 'sSort', 'sFrom', 'sTo'].forEach(function (id) {
     var elx = document.getElementById(id);
@@ -335,8 +357,8 @@ function doSearch(page, silent) {
     issuerLevel: $('#sLevel').value,
     issuer: $('#sIssuer') ? $('#sIssuer').value.trim() : '',
     docNumber: $('#sNumber') ? $('#sNumber').value.trim() : '',
-    fromDate: $('#sFrom').value,
-    toDate: $('#sTo').value,
+    fromDate: dmyToIso($('#sFrom').value),
+    toDate: dmyToIso($('#sTo').value),
     sortBy: sort[0], sortDir: sort[1],
     page: page || 1, pageSize: 15
   };
@@ -545,7 +567,7 @@ function openEditForm(d) {
       '<label>Số/Ký hiệu<input id="edNumber" class="input" value="' + esc(d.docNumber || '') + '" placeholder="VD: 510/QĐ-ĐHĐL"></label>' +
       '<label>Đơn vị ban hành<input id="edIssuer" class="input" list="issuerList" value="' + esc(d.issuer || '') + '" placeholder="VD: Trường Đại học Điện lực"></label>' +
       '<label>Cấp ban hành<select id="edLevel" class="input">' + levelOpts + '</select></label>' +
-      '<label>Ngày ban hành<input id="edDate" type="date" class="input" value="' + esc((d.issuedDate || '').substring(0,10)) + '"></label>' +
+      '<label>Ngày ban hành (dd/mm/yyyy)<input id="edDate" type="text" class="input" placeholder="dd/mm/yyyy" inputmode="numeric" value="' + esc(isoToDmy(d.issuedDate)) + '"></label>' +
       '<label class="full">Trích yếu / Tiêu đề<input id="edTitle" class="input" value="' + esc(d.title || '') + '"></label>' +
       '<label class="full">Nội dung (sửa nếu OCR sai/thiếu)<textarea id="edContent" class="input" rows="8">' + esc(d.content || '') + '</textarea></label>' +
     '</div>' +
