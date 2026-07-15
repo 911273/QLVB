@@ -10,7 +10,7 @@
   <div id="loginScreen" class="login-screen">
     <div class="login-box">
       <div class="login-logo">
-        <? if (logoUri) { ?>
+        <? if (typeof logoUri !== 'undefined' && logoUri) { ?>
         <img class="epu-mark" src="<?= logoUri ?>" alt="EPU">
         <? } else { ?>
         <svg class="epu-mark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-label="EPU">
@@ -45,7 +45,7 @@
     <header class="topbar">
       <div class="brand">
         <div class="logo">
-          <? if (logoUri) { ?>
+          <? if (typeof logoUri !== 'undefined' && logoUri) { ?>
           <img class="epu-mark" src="<?= logoUri ?>" alt="EPU">
           <? } else { ?>
           <svg class="epu-mark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-label="EPU">

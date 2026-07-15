@@ -26,16 +26,30 @@ function getLogoDataUri_() {
   try {
     var folder = getExistingRootFolder_();
     if (!folder) return '';
-    var names = ['logo.png', 'logo.jpg', 'logo.jpeg', 'logo.gif', 'logo.webp'];
+    // 1) Thử tên chính xác (nhanh).
+    var names = ['logo.png', 'logo.jpg', 'logo.jpeg', 'logo.gif', 'logo.webp', 'logo.svg'];
     for (var i = 0; i < names.length; i++) {
       var it = folder.getFilesByName(names[i]);
-      if (it.hasNext()) {
-        var blob = it.next().getBlob();
-        return 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes());
+      if (it.hasNext()) return blobToDataUri_(it.next().getBlob());
+    }
+    // 2) Quét (giới hạn) để bắt các biến thể tên (Logo.PNG, logo (1).png...).
+    var files = folder.getFiles();
+    var scanned = 0;
+    while (files.hasNext() && scanned < 400) {
+      scanned++;
+      var f = files.next();
+      var n = f.getName().toLowerCase();
+      if (/(^|[^a-z])logo[^a-z0-9]*\.(png|jpg|jpeg|gif|webp|svg)$/.test(n) || n.indexOf('logo') === 0) {
+        var ct = f.getBlob().getContentType() || '';
+        if (ct.indexOf('image/') === 0) return blobToDataUri_(f.getBlob());
       }
     }
   } catch (e) { /* bỏ qua, dùng logo dự phòng */ }
   return '';
+}
+function blobToDataUri_(blob) {
+  var ct = blob.getContentType() || 'image/png';
+  return 'data:' + ct + ';base64,' + Utilities.base64Encode(blob.getBytes());
 }
 
 /**
