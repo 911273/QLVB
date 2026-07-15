@@ -9,7 +9,19 @@
   <!-- Màn hình đăng nhập -->
   <div id="loginScreen" class="login-screen">
     <div class="login-box">
-      <div class="login-logo">EPU</div>
+      <div class="login-logo">
+        <svg class="epu-mark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-label="EPU">
+          <path d="M78 22 A38 38 0 1 0 78 78" fill="none" stroke="#0e5aa7" stroke-width="12"/>
+          <g transform="rotate(-18 50 50)" stroke-linecap="round">
+            <line x1="16" y1="40" x2="86" y2="40" stroke="#0e5aa7" stroke-width="9"/>
+            <line x1="16" y1="52" x2="86" y2="52" stroke="#0e5aa7" stroke-width="9"/>
+            <line x1="16" y1="64" x2="86" y2="64" stroke="#0e5aa7" stroke-width="9"/>
+            <line x1="21" y1="40" x2="81" y2="40" stroke="#ffffff" stroke-width="1.4"/>
+            <line x1="21" y1="52" x2="81" y2="52" stroke="#ffffff" stroke-width="1.4"/>
+            <line x1="21" y1="64" x2="81" y2="64" stroke="#ffffff" stroke-width="1.4"/>
+          </g>
+        </svg>
+      </div>
       <h1>Hệ thống Quản lý Văn bản</h1>
       <p class="login-sub">Trường Đại học Điện lực — Đăng nhập</p>
       <label class="login-field">Email
@@ -20,6 +32,7 @@
       </label>
       <div id="loginError" class="login-error"></div>
       <button class="btn btn-primary login-btn" id="btnLogin">Đăng nhập</button>
+      <p class="login-dev">Phát triển (Dev): <b>vupq@epu.edu.vn</b></p>
     </div>
   </div>
 
@@ -27,7 +40,19 @@
     <!-- Header -->
     <header class="topbar">
       <div class="brand">
-        <div class="logo">EPU</div>
+        <div class="logo">
+          <svg class="epu-mark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-label="EPU">
+            <path d="M78 22 A38 38 0 1 0 78 78" fill="none" stroke="#0e5aa7" stroke-width="12"/>
+            <g transform="rotate(-18 50 50)" stroke-linecap="round">
+              <line x1="16" y1="40" x2="86" y2="40" stroke="#0e5aa7" stroke-width="9"/>
+              <line x1="16" y1="52" x2="86" y2="52" stroke="#0e5aa7" stroke-width="9"/>
+              <line x1="16" y1="64" x2="86" y2="64" stroke="#0e5aa7" stroke-width="9"/>
+              <line x1="21" y1="40" x2="81" y2="40" stroke="#ffffff" stroke-width="1.4"/>
+              <line x1="21" y1="52" x2="81" y2="52" stroke="#ffffff" stroke-width="1.4"/>
+              <line x1="21" y1="64" x2="81" y2="64" stroke="#ffffff" stroke-width="1.4"/>
+            </g>
+          </svg>
+        </div>
         <div class="brand-text">
           <h1>Hệ thống Quản lý Văn bản</h1>
           <p>Trường Đại học Điện lực</p>
@@ -255,6 +280,11 @@
         </div>
       </section>
     </main>
+
+    <footer class="app-footer">
+      Hệ thống Quản lý Văn bản — Trường Đại học Điện lực &nbsp;•&nbsp;
+      Phát triển (Dev): <a href="mailto:vupq@epu.edu.vn">vupq@epu.edu.vn</a>
+    </footer>
 
     <div id="toast" class="toast hidden"></div>
     <div id="modal" class="modal hidden">
