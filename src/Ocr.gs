@@ -20,6 +20,12 @@ function extractContent(fileId, mimeType) {
       return { text: convertToDocAndRead_(fileId, mimeType, null), status: 'ok' };
     }
     if (OCR_MIME_TYPES.indexOf(mimeType) !== -1) {
+      // Bỏ qua OCR nếu file quá lớn để tránh treo/timeout; vẫn lập chỉ mục theo tên file.
+      var size = 0;
+      try { size = DriveApp.getFileById(fileId).getSize(); } catch (e) { size = 0; }
+      if (size > MAX_OCR_BYTES) {
+        return { text: '', status: 'skip-large' };
+      }
       return { text: ocrWithGoogle_(fileId), status: 'ok' };
     }
     return { text: '', status: 'skip' };

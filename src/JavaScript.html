@@ -248,6 +248,7 @@ function renderResults(sel, res, keyword) {
 function ocrLabel(s) {
   if (s === 'ok') return 'Đã trích xuất';
   if (s === 'skip') return 'Không OCR';
+  if (s === 'skip-large') return 'File quá lớn - bỏ OCR';
   if (s === 'error') return 'Lỗi OCR';
   return s || '';
 }

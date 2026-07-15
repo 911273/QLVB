@@ -12,17 +12,65 @@ function normalizeVi_(str) {
   var s = str.toString().toLowerCase();
   s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // bo dau
   s = s.replace(/đ/g, 'd').replace(/Đ/g, 'd');
+  s = s.replace(/[_]+/g, ' ');   // gach duoi -> khoang trang (khop ten file de hon)
   return s;
 }
 
 /**
- * Phân loại văn bản. Ưu tiên khớp trong TÊN FILE, sau đó tới NỘI DUNG.
+ * Bảng mã ký hiệu văn bản (viết tắt hay gặp) -> mã loại trong hệ thống.
+ * Dùng để nhận diện loại ngay từ ký hiệu trong TÊN FILE, ví dụ: 2737TB, 510QĐ, 1258/QĐ-ĐHĐL.
+ */
+function getCodeMap_() {
+  return {
+    'QD': 'QD', 'TB': 'TB', 'CV': 'CV', 'KH': 'KH', 'TTR': 'TTr',
+    'BC': 'BC', 'HD': 'HD', 'QT': 'QT', 'GM': 'GM', 'BB': 'BB', 'HDO': 'HDO'
+  };
+}
+
+/**
+ * Nhận diện loại + số hiệu từ TÊN FILE với các dạng:
+ *   "2737TB...", "510QD...", "1258QD..."  (số dính mã)
+ *   "123/QĐ-ĐHĐL", "45/TB-ĐHĐL"           (số/mã-cơ quan)
+ *   "TB 2737", "QĐ-510"                    (mã trước số)
+ * Trả về { code, number } hoặc null.
+ */
+function detectFromFileName_(fileName) {
+  if (!fileName) return null;
+  var base = normalizeVi_(fileName.replace(/\.[a-z0-9]+$/i, '')); // bỏ đuôi + bỏ dấu
+  var map = getCodeMap_();
+
+  // 1) số/ký hiệu: 123/qd-...
+  var m = base.match(/(\d{1,5})\s*\/\s*([a-z]{2,4})/);
+  if (m && map[m[2].toUpperCase()]) return { code: map[m[2].toUpperCase()], number: m[1] };
+
+  // 2) số dính mã ở đầu: 2737tb, 510qd
+  m = base.match(/(?:^|\s)(\d{1,5})\s*([a-z]{2,4})\b/);
+  if (m && map[m[2].toUpperCase()]) return { code: map[m[2].toUpperCase()], number: m[1] };
+
+  // 3) mã trước số: tb 2737, qd-510
+  m = base.match(/(?:^|\s)([a-z]{2,4})\s*[-\s]?\s*(\d{1,5})\b/);
+  if (m && map[m[1].toUpperCase()]) return { code: map[m[1].toUpperCase()], number: m[2] };
+
+  return null;
+}
+
+/**
+ * Phân loại văn bản. Ưu tiên: ký hiệu trong TÊN FILE -> từ khoá TÊN FILE -> NỘI DUNG.
  * Trả về {code, name} hoặc loại "Khác" nếu không khớp.
  */
 function classifyDoc(fileName, content) {
   var types = getDocTypes().slice().sort(function (a, b) {
     return (a.priority || 99) - (b.priority || 99);
   });
+  var byCode = {};
+  types.forEach(function (t) { byCode[t.code] = t; });
+
+  // Vòng 0: nhận diện theo ký hiệu trong tên file (đáng tin nhất cho VB hành chính)
+  var det = detectFromFileName_(fileName);
+  if (det && byCode[det.code]) {
+    return { code: det.code, name: byCode[det.code].name };
+  }
+
   var nName = normalizeVi_(fileName);
   var nContent = normalizeVi_((content || '').substring(0, 3000)); // chỉ xét phần đầu cho nhanh
 
@@ -54,6 +102,12 @@ function matchKeywords_(text, keywords) {
  * Trích số/ký hiệu văn bản, ví dụ: "123/QĐ-ĐHĐL", "45/TB-ĐHĐL".
  */
 function extractDocNumber(fileName, content) {
+  // Ưu tiên nhận diện từ ký hiệu trong tên file (2737TB, 510QĐ, 123/QĐ-ĐHĐL...)
+  var det = detectFromFileName_(fileName);
+  if (det && det.number) {
+    var codeUpper = det.code === 'TTr' ? 'TTr' : det.code;
+    return det.number + '/' + codeUpper + '-ĐHĐL';
+  }
   var sources = [fileName || '', (content || '').substring(0, 2000)];
   var re = /(\d{1,5}\s*\/\s*[A-Za-zĐđ]{1,6}(?:\s*-\s*[A-Za-zĐđ.]{1,12})?)/;
   for (var i = 0; i < sources.length; i++) {

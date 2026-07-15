@@ -21,6 +21,11 @@ var DB_SHEET_LOG = 'NhatKy';     // Sheet nhật ký quét
 // Ngôn ngữ OCR (Google OCR). 'vi' = Tiếng Việt.
 var OCR_LANGUAGE = 'vi';
 
+// Kích thước tối đa (byte) cho phép OCR. File lớn hơn sẽ bị bỏ qua OCR
+// (vì Google OCR dễ thất bại/timeout với PDF scan rất lớn) nhưng VẪN được lập chỉ mục
+// dựa trên tên file. Mặc định 15 MB. PDF nhiều trang nên tách nhỏ để OCR được.
+var MAX_OCR_BYTES = 15 * 1024 * 1024;
+
 // Các định dạng file được xử lý
 var SUPPORTED_MIME = {
   PDF: 'application/pdf',
