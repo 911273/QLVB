@@ -114,6 +114,7 @@ function processFile_(f, existing) {
   var docNumber = extractDocNumber(f.name, content);
   var issued = extractIssuedDate(f.name, content, f.createdDate);
   var title = extractTitle(f.name, content);
+  var issuer = detectIssuer_(f.name, content);
 
   var doc = {
     fileId: f.id,
@@ -129,7 +130,9 @@ function processFile_(f, existing) {
     fileUrl: f.url,
     modifiedTime: f.modifiedTime,
     scannedAt: new Date().toISOString(),
-    ocrStatus: res.status
+    ocrStatus: res.status,
+    issuer: issuer.name,
+    issuerLevel: issuer.level
   };
   var op = upsertDoc_(doc, existing);
   doc._op = op;

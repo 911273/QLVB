@@ -56,6 +56,8 @@ function apiGetStatus() {
     lastScan: lastScan,
     autoScan: hasAutoScanTrigger(),
     docTypes: getDocTypes(),
+    issuers: getIssuers(),
+    issuerLevels: getIssuerLevels(),
     totalDocs: countDocs_(),
     visionEnabled: hasVisionKey_(),
     userEmail: Session.getActiveUser().getEmail()
@@ -107,6 +109,7 @@ function apiGetStats() {
   var docs = readAllDocs();
   var byType = {};
   var byYear = {};
+  var byLevel = {};
   var typeNames = {};
   getDocTypes().forEach(function (t) { typeNames[t.code] = t.name; });
 
@@ -115,6 +118,8 @@ function apiGetStats() {
     byType[code] = (byType[code] || 0) + 1;
     var year = (d.issuedDate || '').substring(0, 4) || 'Không rõ';
     byYear[year] = (byYear[year] || 0) + 1;
+    var level = d.issuerLevel || 'Chưa rõ';
+    byLevel[level] = (byLevel[level] || 0) + 1;
   });
 
   var typeStats = Object.keys(byType).map(function (code) {
@@ -125,7 +130,11 @@ function apiGetStats() {
     return { year: y, count: byYear[y] };
   }).sort(function (a, b) { return a.year < b.year ? 1 : -1; });
 
-  return { total: docs.length, byType: typeStats, byYear: yearStats };
+  var levelStats = Object.keys(byLevel).map(function (l) {
+    return { level: l, count: byLevel[l] };
+  }).sort(function (a, b) { return b.count - a.count; });
+
+  return { total: docs.length, byType: typeStats, byYear: yearStats, byLevel: levelStats };
 }
 
 /**
@@ -157,6 +166,21 @@ function apiSaveDocTypes(docTypes) {
 function apiResetDocTypes() {
   PropertiesService.getScriptProperties().deleteProperty(PROP_DOC_TYPES);
   return getDocTypes();
+}
+
+/**
+ * Lưu danh mục đơn vị ban hành tuỳ biến.
+ */
+function apiSaveIssuers(issuers) {
+  return saveIssuers(issuers);
+}
+
+/**
+ * Đặt lại danh mục đơn vị ban hành về mặc định.
+ */
+function apiResetIssuers() {
+  PropertiesService.getScriptProperties().deleteProperty(PROP_ISSUERS);
+  return getIssuers();
 }
 
 /**

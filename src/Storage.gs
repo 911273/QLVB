@@ -18,13 +18,16 @@ var COLS = {
   FILE_URL: 10,      // Link mở file trên Drive
   MODIFIED_TIME: 11, // Thời điểm sửa file gần nhất (ISO)
   SCANNED_AT: 12,    // Thời điểm quét/cập nhật vào DB (ISO)
-  OCR_STATUS: 13     // 'ok' | 'skip' | 'error'
+  OCR_STATUS: 13,    // 'ok' | 'skip' | 'error'
+  ISSUER: 14,        // Đơn vị ban hành (tên)
+  ISSUER_LEVEL: 15   // Cấp ban hành (Chính phủ, Bộ/Ngành, Trường, Khoa, Phòng/Ban...)
 };
 
 var DB_HEADERS = [
   'FileId', 'Tên file', 'Loại văn bản', 'Mã loại', 'Số/Ký hiệu',
   'Ngày ban hành', 'Trích yếu', 'Nội dung', 'Đường dẫn', 'MimeType',
-  'Link Drive', 'Sửa lần cuối', 'Quét lúc', 'OCR'
+  'Link Drive', 'Sửa lần cuối', 'Quét lúc', 'OCR',
+  'Đơn vị ban hành', 'Cấp ban hành'
 ];
 
 /**
@@ -116,6 +119,15 @@ function ensureSheets_(ss) {
     docs.setFrozenRows(1);
     docs.getRange(1, 1, 1, DB_HEADERS.length).setFontWeight('bold')
         .setBackground('#0B5394').setFontColor('#ffffff');
+  } else {
+    // Bổ sung cột tiêu đề mới (tương thích CSDL cũ) nếu thiếu.
+    var curHeaders = docs.getRange(1, 1, 1, DB_HEADERS.length).getValues()[0];
+    if (curHeaders[COLS.ISSUER] !== DB_HEADERS[COLS.ISSUER] ||
+        curHeaders[COLS.ISSUER_LEVEL] !== DB_HEADERS[COLS.ISSUER_LEVEL]) {
+      docs.getRange(1, 1, 1, DB_HEADERS.length).setValues([DB_HEADERS]);
+      docs.getRange(1, 1, 1, DB_HEADERS.length).setFontWeight('bold')
+          .setBackground('#0B5394').setFontColor('#ffffff');
+    }
   }
   // Định dạng cột "Ngày ban hành" hiển thị dd/mm/yyyy (áp dụng cho toàn cột).
   try {
@@ -176,7 +188,9 @@ function rowToObj_(r) {
     fileUrl: cell_(r[COLS.FILE_URL]),
     modifiedTime: cell_(r[COLS.MODIFIED_TIME]),
     scannedAt: cell_(r[COLS.SCANNED_AT]),
-    ocrStatus: cell_(r[COLS.OCR_STATUS])
+    ocrStatus: cell_(r[COLS.OCR_STATUS]),
+    issuer: cell_(r[COLS.ISSUER]),
+    issuerLevel: cell_(r[COLS.ISSUER_LEVEL])
   };
 }
 
@@ -225,6 +239,8 @@ function docToRow_(d) {
   row[COLS.MODIFIED_TIME] = d.modifiedTime;
   row[COLS.SCANNED_AT] = d.scannedAt;
   row[COLS.OCR_STATUS] = d.ocrStatus;
+  row[COLS.ISSUER] = d.issuer || '';
+  row[COLS.ISSUER_LEVEL] = d.issuerLevel || '';
   return row;
 }
 
@@ -287,6 +303,8 @@ function updateDocManual(p) {
   if (p.issuedDate != null) cur.issuedDate = normalizeDateInput_(p.issuedDate);
   if (p.title != null) cur.title = String(p.title);
   if (p.content != null) cur.content = String(p.content).substring(0, 45000);
+  if (p.issuer != null) cur.issuer = String(p.issuer).trim();
+  if (p.issuerLevel != null) cur.issuerLevel = String(p.issuerLevel).trim();
 
   cur.ocrStatus = 'manual';
   cur.scannedAt = new Date().toISOString();

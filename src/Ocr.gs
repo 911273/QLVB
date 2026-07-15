@@ -117,6 +117,11 @@ function reOcrDoc(fileId) {
   current.ocrStatus = res.status;
   current.title = extractTitle(current.fileName, res.text) || current.title;
   if (!current.docNumber) current.docNumber = extractDocNumber(current.fileName, res.text);
+  if (!current.issuer) {
+    var iss = detectIssuer_(current.fileName, res.text);
+    current.issuer = iss.name;
+    current.issuerLevel = iss.level;
+  }
   current.scannedAt = new Date().toISOString();
   upsertDoc_(current, existing);
   writeLog_('OCR lại', 1, current.fileName);

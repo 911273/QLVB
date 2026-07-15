@@ -50,6 +50,10 @@
             <div id="yearChart" class="bar-list"></div>
           </div>
         </div>
+        <div class="card">
+          <h3>Phân bố theo cấp ban hành</h3>
+          <div id="levelChart" class="bar-list"></div>
+        </div>
       </section>
 
       <!-- TAB: Danh sách -->
@@ -73,6 +77,9 @@
           <div class="form-row">
             <label>Loại VB
               <select id="sType" class="input"></select>
+            </label>
+            <label>Cấp ban hành
+              <select id="sLevel" class="input"></select>
             </label>
             <label>Từ ngày
               <input type="date" id="sFrom" class="input">
@@ -160,6 +167,16 @@
             <button class="btn" id="btnAddType">+ Thêm loại</button>
             <button class="btn btn-primary" id="btnSaveTypes">Lưu</button>
             <button class="btn" id="btnResetTypes">Khôi phục mặc định</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Đơn vị ban hành</h3>
+          <p class="muted">Danh mục đơn vị ban hành theo cấp, dùng để tự động nhận diện. Từ khoá cách nhau bởi dấu phẩy. Khi văn bản nhắc tới nhiều cấp, hệ thống chọn đơn vị ở cấp cụ thể nhất.</p>
+          <table class="types-table" id="issuersTable"></table>
+          <div class="form-row">
+            <button class="btn" id="btnAddIssuer">+ Thêm đơn vị</button>
+            <button class="btn btn-primary" id="btnSaveIssuers">Lưu</button>
+            <button class="btn" id="btnResetIssuers">Khôi phục mặc định</button>
           </div>
         </div>
       </section>

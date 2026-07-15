@@ -24,11 +24,13 @@ function searchDocs(query) {
 
   var filtered = docs.filter(function (d) {
     if (query.typeCode && d.docTypeCode !== query.typeCode) return false;
+    if (query.issuerLevel && d.issuerLevel !== query.issuerLevel) return false;
     if (query.fromDate && (!d.issuedDate || d.issuedDate < query.fromDate)) return false;
     if (query.toDate && (!d.issuedDate || d.issuedDate > query.toDate)) return false;
     if (terms.length) {
       var hay = normalizeVi_([
-        d.fileName, d.docNumber, d.title, d.docType, d.content, d.folderPath
+        d.fileName, d.docNumber, d.title, d.docType, d.content, d.folderPath,
+        d.issuer, d.issuerLevel
       ].join(' \n '));
       for (var i = 0; i < terms.length; i++) {
         if (hay.indexOf(terms[i]) === -1) return false; // AND các từ khoá
@@ -58,6 +60,8 @@ function searchDocs(query) {
       docNumber: d.docNumber,
       issuedDate: d.issuedDate,
       title: d.title,
+      issuer: d.issuer,
+      issuerLevel: d.issuerLevel,
       folderPath: d.folderPath,
       mimeType: d.mimeType,
       fileUrl: d.fileUrl,

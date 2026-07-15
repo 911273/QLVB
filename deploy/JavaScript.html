@@ -10,7 +10,7 @@ function call(fn, arg) {
 }
 
 var TYPE_ICONS = {}; // code -> short label
-var STATE = { status: null, docTypes: [] };
+var STATE = { status: null, docTypes: [], issuers: [], issuerLevels: [] };
 
 /* ============ Tiện ích UI ============ */
 function $(sel, root) { return (root || document).querySelector(sel); }
@@ -66,7 +66,7 @@ function bindTabs() {
       $('#tab-' + tab.dataset.tab).classList.add('active');
       if (tab.dataset.tab === 'list') loadList(1);
       if (tab.dataset.tab === 'overview') loadStats();
-      if (tab.dataset.tab === 'settings') { renderTypesTable(); renderVisionStatus(); }
+      if (tab.dataset.tab === 'settings') { renderTypesTable(); renderIssuersTable(); renderVisionStatus(); }
       if (tab.dataset.tab === 'scan') loadUploadHint();
     });
   });
@@ -86,6 +86,9 @@ function bindActions() {
   $('#btnAddType').addEventListener('click', addTypeRow);
   $('#btnSaveTypes').addEventListener('click', saveTypes);
   $('#btnResetTypes').addEventListener('click', resetTypes);
+  $('#btnAddIssuer').addEventListener('click', addIssuerRow);
+  $('#btnSaveIssuers').addEventListener('click', saveIssuers);
+  $('#btnResetIssuers').addEventListener('click', resetIssuers);
   $('#btnSaveVision').addEventListener('click', saveVision);
   $('#btnTestVision').addEventListener('click', testVision);
   $('#btnClearVision').addEventListener('click', clearVision);
@@ -99,9 +102,12 @@ function loadStatus() {
   call('apiGetStatus').then(function (st) {
     STATE.status = st;
     STATE.docTypes = st.docTypes || [];
+    STATE.issuers = st.issuers || [];
+    STATE.issuerLevels = st.issuerLevels || [];
     $('#userBox').innerHTML = 'Đăng nhập: <b>' + esc(st.userEmail || '') + '</b>';
     $('#initBanner').classList.toggle('hidden', st.initialized);
     fillTypeSelects();
+    fillLevelSelect();
     renderSysInfo();
     renderStatCardsFromStatus();
     loadStats();
@@ -117,8 +123,11 @@ function doInitialize() {
   call('apiInitialize').then(function (st) {
     STATE.status = st;
     STATE.docTypes = st.docTypes || [];
+    STATE.issuers = st.issuers || [];
+    STATE.issuerLevels = st.issuerLevels || [];
     $('#initBanner').classList.add('hidden');
     fillTypeSelects();
+    fillLevelSelect();
     renderSysInfo();
     showLoading(false);
     toast('Đã khởi tạo hệ thống thành công!', 'ok');
@@ -136,6 +145,16 @@ function fillTypeSelects() {
   });
   $('#sType').innerHTML = opts;
   $('#listType').innerHTML = opts;
+}
+
+function fillLevelSelect() {
+  var sel = $('#sLevel');
+  if (!sel) return;
+  var opts = '<option value="">— Tất cả cấp —</option>';
+  (STATE.issuerLevels || []).forEach(function (lv) {
+    opts += '<option value="' + esc(lv) + '">' + esc(lv) + '</option>';
+  });
+  sel.innerHTML = opts;
 }
 
 /* ============ Tổng quan ============ */
@@ -159,6 +178,7 @@ function loadStats() {
     if (!s) return;
     renderBarList('#typeChart', (s.byType || []).map(function (t) { return { label: t.name, count: t.count }; }));
     renderBarList('#yearChart', (s.byYear || []).map(function (y) { return { label: y.year, count: y.count }; }));
+    renderBarList('#levelChart', (s.byLevel || []).map(function (l) { return { label: l.level, count: l.count }; }));
   }).catch(function () {});
 }
 function renderBarList(sel, items) {
@@ -196,6 +216,7 @@ function doSearch(page) {
   var q = {
     keyword: $('#sKeyword').value.trim(),
     typeCode: $('#sType').value,
+    issuerLevel: $('#sLevel').value,
     fromDate: $('#sFrom').value,
     toDate: $('#sTo').value,
     sortBy: sort[0], sortDir: sort[1],
@@ -233,6 +254,7 @@ function renderResults(sel, res, keyword) {
         '<span><b>' + esc(d.docType || 'Khác') + '</b></span>' +
         (d.docNumber ? '<span>Số: <b>' + esc(d.docNumber) + '</b></span>' : '') +
         '<span>Ngày BH: <b>' + fmtDate(d.issuedDate) + '</b></span>' +
+        (d.issuer ? '<span>ĐV: <b>' + esc(d.issuer) + '</b>' + (d.issuerLevel ? ' <span class="tag">' + esc(d.issuerLevel) + '</span>' : '') + '</span>' : (d.issuerLevel ? '<span class="tag">' + esc(d.issuerLevel) + '</span>' : '')) +
         '<span>' + esc(d.fileName) + '</span>' +
         '<span class="tag ' + esc(d.ocrStatus) + '">' + ocrLabel(d.ocrStatus) + '</span>' +
       '</div>' +
@@ -302,6 +324,8 @@ function openDetail(fileId) {
       '<div class="sys-info">' +
         row('Loại VB', esc(d.docType) + ' (' + esc(d.docTypeCode) + ')') +
         row('Số/Ký hiệu', esc(d.docNumber || '—')) +
+        row('Đơn vị ban hành', esc(d.issuer || '—')) +
+        row('Cấp ban hành', esc(d.issuerLevel || '—')) +
         row('Ngày ban hành', fmtDate(d.issuedDate)) +
         row('Tên file', esc(d.fileName)) +
         row('Đường dẫn', esc(d.folderPath || '/')) +
@@ -331,12 +355,22 @@ function openEditForm(d) {
   }).join('');
   typeOpts += '<option value="KHAC"' + (d.docTypeCode === 'KHAC' ? ' selected' : '') + '>Khác</option>';
 
+  var levelOpts = '<option value="">— Chưa rõ —</option>' + (STATE.issuerLevels || []).map(function (lv) {
+    return '<option value="' + esc(lv) + '"' + (lv === d.issuerLevel ? ' selected' : '') + '>' + esc(lv) + '</option>';
+  }).join('');
+  var issuerList = (STATE.issuers || []).map(function (it) {
+    return '<option value="' + esc(it.name) + '">';
+  }).join('');
+
   var html =
     '<h2>Sửa thông tin văn bản</h2>' +
     '<p class="muted">Tên file: ' + esc(d.fileName) + '</p>' +
+    '<datalist id="issuerList">' + issuerList + '</datalist>' +
     '<div class="edit-grid">' +
       '<label>Loại văn bản<select id="edType" class="input">' + typeOpts + '</select></label>' +
       '<label>Số/Ký hiệu<input id="edNumber" class="input" value="' + esc(d.docNumber || '') + '" placeholder="VD: 510/QĐ-ĐHĐL"></label>' +
+      '<label>Đơn vị ban hành<input id="edIssuer" class="input" list="issuerList" value="' + esc(d.issuer || '') + '" placeholder="VD: Trường Đại học Điện lực"></label>' +
+      '<label>Cấp ban hành<select id="edLevel" class="input">' + levelOpts + '</select></label>' +
       '<label>Ngày ban hành<input id="edDate" type="date" class="input" value="' + esc((d.issuedDate || '').substring(0,10)) + '"></label>' +
       '<label class="full">Trích yếu / Tiêu đề<input id="edTitle" class="input" value="' + esc(d.title || '') + '"></label>' +
       '<label class="full">Nội dung (sửa nếu OCR sai/thiếu)<textarea id="edContent" class="input" rows="10">' + esc(d.content || '') + '</textarea></label>' +
@@ -350,6 +384,12 @@ function openEditForm(d) {
   $('#modal').classList.remove('hidden');
   $('#btnCancelEdit').addEventListener('click', function () { openDetail(d.fileId); });
   $('#btnSaveEdit').addEventListener('click', function () { saveEdit(d.fileId); });
+  // Chọn đơn vị có sẵn -> tự điền cấp ban hành tương ứng.
+  $('#edIssuer').addEventListener('change', function () {
+    var name = this.value.trim();
+    var match = (STATE.issuers || []).filter(function (it) { return it.name === name; })[0];
+    if (match && match.level) $('#edLevel').value = match.level;
+  });
 }
 
 function saveEdit(fileId) {
@@ -357,6 +397,8 @@ function saveEdit(fileId) {
     fileId: fileId,
     docTypeCode: $('#edType').value,
     docNumber: $('#edNumber').value.trim(),
+    issuer: $('#edIssuer').value.trim(),
+    issuerLevel: $('#edLevel').value,
     issuedDate: $('#edDate').value,
     title: $('#edTitle').value.trim(),
     content: $('#edContent').value
@@ -503,6 +545,74 @@ function resetTypes() {
     renderTypesTable();
     showLoading(false);
     toast('Đã khôi phục danh sách mặc định.', 'ok');
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+/* ============ Đơn vị ban hành ============ */
+function renderIssuersTable() {
+  var t = $('#issuersTable');
+  if (!t) return;
+  var levelOptsHtml = function (sel) {
+    return (STATE.issuerLevels || []).map(function (lv) {
+      return '<option value="' + esc(lv) + '"' + (lv === sel ? ' selected' : '') + '>' + esc(lv) + '</option>';
+    }).join('');
+  };
+  t.innerHTML =
+    '<tr><th style="width:200px">Tên đơn vị</th><th style="width:130px">Cấp</th><th>Từ khoá (nhận diện tự động)</th><th style="width:60px">Xoá</th></tr>';
+  (STATE.issuers || []).forEach(function (it) {
+    var tr = el('tr');
+    tr.innerHTML =
+      '<td><input value="' + esc(it.name || '') + '" data-f="name"></td>' +
+      '<td><select data-f="level" style="width:100%;border:none">' + levelOptsHtml(it.level) + '</select></td>' +
+      '<td><input value="' + esc((it.keywords || []).join(', ')) + '" data-f="keywords"></td>' +
+      '<td style="text-align:center"><button class="btn" data-del="1">×</button></td>';
+    tr.querySelector('[data-del]').addEventListener('click', function () { tr.remove(); });
+    t.appendChild(tr);
+  });
+}
+function addIssuerRow() {
+  var t = $('#issuersTable');
+  var levelOpts = (STATE.issuerLevels || []).map(function (lv) {
+    return '<option value="' + esc(lv) + '">' + esc(lv) + '</option>';
+  }).join('');
+  var tr = el('tr');
+  tr.innerHTML =
+    '<td><input value="" data-f="name"></td>' +
+    '<td><select data-f="level" style="width:100%;border:none">' + levelOpts + '</select></td>' +
+    '<td><input value="" data-f="keywords"></td>' +
+    '<td style="text-align:center"><button class="btn" data-del="1">×</button></td>';
+  tr.querySelector('[data-del]').addEventListener('click', function () { tr.remove(); });
+  t.appendChild(tr);
+}
+function collectIssuers() {
+  var rows = $all('#issuersTable tr');
+  var out = [];
+  rows.forEach(function (tr, i) {
+    if (i === 0) return;
+    var name = tr.querySelector('[data-f="name"]').value.trim();
+    var level = tr.querySelector('[data-f="level"]').value;
+    var kw = tr.querySelector('[data-f="keywords"]').value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    if (name) out.push({ name: name, level: level, keywords: kw });
+  });
+  return out;
+}
+function saveIssuers() {
+  var issuers = collectIssuers();
+  if (!issuers.length) { toast('Cần ít nhất 1 đơn vị.', 'err'); return; }
+  showLoading(true, 'Đang lưu...');
+  call('apiSaveIssuers', issuers).then(function (list) {
+    STATE.issuers = list;
+    showLoading(false);
+    toast('Đã lưu danh mục đơn vị ban hành.', 'ok');
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+function resetIssuers() {
+  showLoading(true, 'Đang khôi phục...');
+  call('apiResetIssuers').then(function (list) {
+    STATE.issuers = list;
+    renderIssuersTable();
+    showLoading(false);
+    toast('Đã khôi phục danh mục mặc định.', 'ok');
   }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
 }
 

@@ -129,3 +129,59 @@ function saveDocTypes(docTypes) {
     .setProperty(PROP_DOC_TYPES, JSON.stringify(docTypes));
   return getDocTypes();
 }
+
+/* ===================== ĐƠN VỊ / CẤP BAN HÀNH ===================== */
+
+var PROP_ISSUERS = 'ISSUERS_JSON';
+
+// Các cấp ban hành (từ cao xuống thấp). rank càng lớn = càng cụ thể/nội bộ,
+// dùng để chọn đơn vị ban hành cụ thể nhất khi văn bản nhắc tới nhiều cấp.
+function getIssuerLevels() {
+  return ['Chính phủ', 'Bộ/Ngành', 'Trường', 'Khoa', 'Phòng/Ban', 'Trung tâm', 'Khác'];
+}
+function getLevelRank_(level) {
+  var r = {
+    'Chính phủ': 1, 'Bộ/Ngành': 2, 'Trường': 3,
+    'Khoa': 4, 'Phòng/Ban': 4, 'Trung tâm': 4, 'Khác': 0
+  };
+  return r[level] || 0;
+}
+
+/**
+ * Danh mục đơn vị ban hành mặc định (có thể tuỳ biến trong Cài đặt).
+ * keywords: từ khoá (không dấu, thường) để tự nhận diện từ nội dung/tên file.
+ */
+function getDefaultIssuers() {
+  return [
+    { name: 'Chính phủ', level: 'Chính phủ', keywords: ['chinh phu', 'thu tuong chinh phu'] },
+    { name: 'Quốc hội', level: 'Chính phủ', keywords: ['quoc hoi'] },
+    { name: 'Bộ Giáo dục và Đào tạo', level: 'Bộ/Ngành', keywords: ['bo giao duc', 'giao duc va dao tao', 'bgd&dt', 'bgddt'] },
+    { name: 'Bộ Công Thương', level: 'Bộ/Ngành', keywords: ['bo cong thuong'] },
+    { name: 'Bộ Lao động - Thương binh và Xã hội', level: 'Bộ/Ngành', keywords: ['lao dong', 'thuong binh va xa hoi'] },
+    { name: 'Trường Đại học Điện lực', level: 'Trường', keywords: ['dai hoc dien luc', 'truong dai hoc dien luc', 'dhdl', 'epu'] },
+    { name: 'Phòng Đào tạo', level: 'Phòng/Ban', keywords: ['phong dao tao'] },
+    { name: 'Phòng Tổ chức - Hành chính', level: 'Phòng/Ban', keywords: ['to chuc hanh chinh', 'phong tccb', 'to chuc can bo'] },
+    { name: 'Phòng Khoa học Công nghệ', level: 'Phòng/Ban', keywords: ['khoa hoc cong nghe', 'phong khcn'] },
+    { name: 'Phòng Công tác Sinh viên', level: 'Phòng/Ban', keywords: ['cong tac sinh vien', 'phong ctsv'] },
+    { name: 'Khoa Công nghệ Thông tin', level: 'Khoa', keywords: ['khoa cong nghe thong tin', 'khoa cntt'] },
+    { name: 'Khoa Điện', level: 'Khoa', keywords: ['khoa dien'] },
+    { name: 'Khoa Kinh tế và Quản lý', level: 'Khoa', keywords: ['khoa kinh te', 'kinh te va quan ly'] }
+  ];
+}
+
+function getIssuers() {
+  var raw = PropertiesService.getScriptProperties().getProperty(PROP_ISSUERS);
+  if (raw) {
+    try {
+      var parsed = JSON.parse(raw);
+      if (parsed && parsed.length) return parsed;
+    } catch (e) { /* fallback */ }
+  }
+  return getDefaultIssuers();
+}
+
+function saveIssuers(issuers) {
+  PropertiesService.getScriptProperties()
+    .setProperty(PROP_ISSUERS, JSON.stringify(issuers));
+  return getIssuers();
+}

@@ -1,7 +1,7 @@
 /*************************************************************************
  * QLVB-EPU - FILE MÃ NGUỒN GỘP (dán toàn bộ vào 1 file Code.gs)
  * Hệ thống Quản lý Văn bản - Trường Đại học Điện lực
- * Gồm: Config + Storage + Classifier + Vision + Ocr + Scanner + Search + Code
+ * Gồm: Config + Storage + Classifier + Issuer + Vision + Ocr + Scanner + Search + Code
  *************************************************************************/
 
 /* ===================== Config.gs ===================== */
@@ -137,6 +137,62 @@ function saveDocTypes(docTypes) {
   return getDocTypes();
 }
 
+/* ===================== ĐƠN VỊ / CẤP BAN HÀNH ===================== */
+
+var PROP_ISSUERS = 'ISSUERS_JSON';
+
+// Các cấp ban hành (từ cao xuống thấp). rank càng lớn = càng cụ thể/nội bộ,
+// dùng để chọn đơn vị ban hành cụ thể nhất khi văn bản nhắc tới nhiều cấp.
+function getIssuerLevels() {
+  return ['Chính phủ', 'Bộ/Ngành', 'Trường', 'Khoa', 'Phòng/Ban', 'Trung tâm', 'Khác'];
+}
+function getLevelRank_(level) {
+  var r = {
+    'Chính phủ': 1, 'Bộ/Ngành': 2, 'Trường': 3,
+    'Khoa': 4, 'Phòng/Ban': 4, 'Trung tâm': 4, 'Khác': 0
+  };
+  return r[level] || 0;
+}
+
+/**
+ * Danh mục đơn vị ban hành mặc định (có thể tuỳ biến trong Cài đặt).
+ * keywords: từ khoá (không dấu, thường) để tự nhận diện từ nội dung/tên file.
+ */
+function getDefaultIssuers() {
+  return [
+    { name: 'Chính phủ', level: 'Chính phủ', keywords: ['chinh phu', 'thu tuong chinh phu'] },
+    { name: 'Quốc hội', level: 'Chính phủ', keywords: ['quoc hoi'] },
+    { name: 'Bộ Giáo dục và Đào tạo', level: 'Bộ/Ngành', keywords: ['bo giao duc', 'giao duc va dao tao', 'bgd&dt', 'bgddt'] },
+    { name: 'Bộ Công Thương', level: 'Bộ/Ngành', keywords: ['bo cong thuong'] },
+    { name: 'Bộ Lao động - Thương binh và Xã hội', level: 'Bộ/Ngành', keywords: ['lao dong', 'thuong binh va xa hoi'] },
+    { name: 'Trường Đại học Điện lực', level: 'Trường', keywords: ['dai hoc dien luc', 'truong dai hoc dien luc', 'dhdl', 'epu'] },
+    { name: 'Phòng Đào tạo', level: 'Phòng/Ban', keywords: ['phong dao tao'] },
+    { name: 'Phòng Tổ chức - Hành chính', level: 'Phòng/Ban', keywords: ['to chuc hanh chinh', 'phong tccb', 'to chuc can bo'] },
+    { name: 'Phòng Khoa học Công nghệ', level: 'Phòng/Ban', keywords: ['khoa hoc cong nghe', 'phong khcn'] },
+    { name: 'Phòng Công tác Sinh viên', level: 'Phòng/Ban', keywords: ['cong tac sinh vien', 'phong ctsv'] },
+    { name: 'Khoa Công nghệ Thông tin', level: 'Khoa', keywords: ['khoa cong nghe thong tin', 'khoa cntt'] },
+    { name: 'Khoa Điện', level: 'Khoa', keywords: ['khoa dien'] },
+    { name: 'Khoa Kinh tế và Quản lý', level: 'Khoa', keywords: ['khoa kinh te', 'kinh te va quan ly'] }
+  ];
+}
+
+function getIssuers() {
+  var raw = PropertiesService.getScriptProperties().getProperty(PROP_ISSUERS);
+  if (raw) {
+    try {
+      var parsed = JSON.parse(raw);
+      if (parsed && parsed.length) return parsed;
+    } catch (e) { /* fallback */ }
+  }
+  return getDefaultIssuers();
+}
+
+function saveIssuers(issuers) {
+  PropertiesService.getScriptProperties()
+    .setProperty(PROP_ISSUERS, JSON.stringify(issuers));
+  return getIssuers();
+}
+
 
 /* ===================== Storage.gs ===================== */
 /**
@@ -159,13 +215,16 @@ var COLS = {
   FILE_URL: 10,      // Link mở file trên Drive
   MODIFIED_TIME: 11, // Thời điểm sửa file gần nhất (ISO)
   SCANNED_AT: 12,    // Thời điểm quét/cập nhật vào DB (ISO)
-  OCR_STATUS: 13     // 'ok' | 'skip' | 'error'
+  OCR_STATUS: 13,    // 'ok' | 'skip' | 'error'
+  ISSUER: 14,        // Đơn vị ban hành (tên)
+  ISSUER_LEVEL: 15   // Cấp ban hành (Chính phủ, Bộ/Ngành, Trường, Khoa, Phòng/Ban...)
 };
 
 var DB_HEADERS = [
   'FileId', 'Tên file', 'Loại văn bản', 'Mã loại', 'Số/Ký hiệu',
   'Ngày ban hành', 'Trích yếu', 'Nội dung', 'Đường dẫn', 'MimeType',
-  'Link Drive', 'Sửa lần cuối', 'Quét lúc', 'OCR'
+  'Link Drive', 'Sửa lần cuối', 'Quét lúc', 'OCR',
+  'Đơn vị ban hành', 'Cấp ban hành'
 ];
 
 /**
@@ -257,6 +316,15 @@ function ensureSheets_(ss) {
     docs.setFrozenRows(1);
     docs.getRange(1, 1, 1, DB_HEADERS.length).setFontWeight('bold')
         .setBackground('#0B5394').setFontColor('#ffffff');
+  } else {
+    // Bổ sung cột tiêu đề mới (tương thích CSDL cũ) nếu thiếu.
+    var curHeaders = docs.getRange(1, 1, 1, DB_HEADERS.length).getValues()[0];
+    if (curHeaders[COLS.ISSUER] !== DB_HEADERS[COLS.ISSUER] ||
+        curHeaders[COLS.ISSUER_LEVEL] !== DB_HEADERS[COLS.ISSUER_LEVEL]) {
+      docs.getRange(1, 1, 1, DB_HEADERS.length).setValues([DB_HEADERS]);
+      docs.getRange(1, 1, 1, DB_HEADERS.length).setFontWeight('bold')
+          .setBackground('#0B5394').setFontColor('#ffffff');
+    }
   }
   // Định dạng cột "Ngày ban hành" hiển thị dd/mm/yyyy (áp dụng cho toàn cột).
   try {
@@ -317,7 +385,9 @@ function rowToObj_(r) {
     fileUrl: cell_(r[COLS.FILE_URL]),
     modifiedTime: cell_(r[COLS.MODIFIED_TIME]),
     scannedAt: cell_(r[COLS.SCANNED_AT]),
-    ocrStatus: cell_(r[COLS.OCR_STATUS])
+    ocrStatus: cell_(r[COLS.OCR_STATUS]),
+    issuer: cell_(r[COLS.ISSUER]),
+    issuerLevel: cell_(r[COLS.ISSUER_LEVEL])
   };
 }
 
@@ -366,6 +436,8 @@ function docToRow_(d) {
   row[COLS.MODIFIED_TIME] = d.modifiedTime;
   row[COLS.SCANNED_AT] = d.scannedAt;
   row[COLS.OCR_STATUS] = d.ocrStatus;
+  row[COLS.ISSUER] = d.issuer || '';
+  row[COLS.ISSUER_LEVEL] = d.issuerLevel || '';
   return row;
 }
 
@@ -428,6 +500,8 @@ function updateDocManual(p) {
   if (p.issuedDate != null) cur.issuedDate = normalizeDateInput_(p.issuedDate);
   if (p.title != null) cur.title = String(p.title);
   if (p.content != null) cur.content = String(p.content).substring(0, 45000);
+  if (p.issuer != null) cur.issuer = String(p.issuer).trim();
+  if (p.issuerLevel != null) cur.issuerLevel = String(p.issuerLevel).trim();
 
   cur.ocrStatus = 'manual';
   cur.scannedAt = new Date().toISOString();
@@ -646,6 +720,34 @@ function extractTitle(fileName, content) {
   }
   // fallback: bỏ đuôi file
   return (fileName || '').replace(/\.[a-z0-9]+$/i, '');
+}
+
+
+/* ===================== Issuer.gs ===================== */
+/**
+ * Issuer.gs
+ * Nhận diện ĐƠN VỊ BAN HÀNH + CẤP BAN HÀNH từ tên file và nội dung văn bản.
+ *
+ * Văn bản hành chính thường ghi cơ quan cấp trên rồi tới đơn vị ban hành, ví dụ:
+ *   "BỘ CÔNG THƯƠNG / TRƯỜNG ĐẠI HỌC ĐIỆN LỰC".
+ * Vì vậy khi nhiều cấp cùng xuất hiện, ta chọn đơn vị ở CẤP CỤ THỂ NHẤT (rank cao nhất).
+ */
+function detectIssuer_(fileName, content) {
+  var hay = normalizeVi_((content || '').substring(0, 2500) + ' \n ' + (fileName || ''));
+  var issuers = getIssuers();
+
+  var best = null;   // {name, level, rank}
+  for (var i = 0; i < issuers.length; i++) {
+    var it = issuers[i];
+    if (matchKeywords_(hay, it.keywords)) {
+      var rank = getLevelRank_(it.level);
+      if (!best || rank > best.rank) {
+        best = { name: it.name, level: it.level, rank: rank };
+      }
+    }
+  }
+  if (best) return { name: best.name, level: best.level };
+  return { name: '', level: '' };
 }
 
 
@@ -901,6 +1003,11 @@ function reOcrDoc(fileId) {
   current.ocrStatus = res.status;
   current.title = extractTitle(current.fileName, res.text) || current.title;
   if (!current.docNumber) current.docNumber = extractDocNumber(current.fileName, res.text);
+  if (!current.issuer) {
+    var iss = detectIssuer_(current.fileName, res.text);
+    current.issuer = iss.name;
+    current.issuerLevel = iss.level;
+  }
   current.scannedAt = new Date().toISOString();
   upsertDoc_(current, existing);
   writeLog_('OCR lại', 1, current.fileName);
@@ -1025,6 +1132,7 @@ function processFile_(f, existing) {
   var docNumber = extractDocNumber(f.name, content);
   var issued = extractIssuedDate(f.name, content, f.createdDate);
   var title = extractTitle(f.name, content);
+  var issuer = detectIssuer_(f.name, content);
 
   var doc = {
     fileId: f.id,
@@ -1040,7 +1148,9 @@ function processFile_(f, existing) {
     fileUrl: f.url,
     modifiedTime: f.modifiedTime,
     scannedAt: new Date().toISOString(),
-    ocrStatus: res.status
+    ocrStatus: res.status,
+    issuer: issuer.name,
+    issuerLevel: issuer.level
   };
   var op = upsertDoc_(doc, existing);
   doc._op = op;
@@ -1115,11 +1225,13 @@ function searchDocs(query) {
 
   var filtered = docs.filter(function (d) {
     if (query.typeCode && d.docTypeCode !== query.typeCode) return false;
+    if (query.issuerLevel && d.issuerLevel !== query.issuerLevel) return false;
     if (query.fromDate && (!d.issuedDate || d.issuedDate < query.fromDate)) return false;
     if (query.toDate && (!d.issuedDate || d.issuedDate > query.toDate)) return false;
     if (terms.length) {
       var hay = normalizeVi_([
-        d.fileName, d.docNumber, d.title, d.docType, d.content, d.folderPath
+        d.fileName, d.docNumber, d.title, d.docType, d.content, d.folderPath,
+        d.issuer, d.issuerLevel
       ].join(' \n '));
       for (var i = 0; i < terms.length; i++) {
         if (hay.indexOf(terms[i]) === -1) return false; // AND các từ khoá
@@ -1149,6 +1261,8 @@ function searchDocs(query) {
       docNumber: d.docNumber,
       issuedDate: d.issuedDate,
       title: d.title,
+      issuer: d.issuer,
+      issuerLevel: d.issuerLevel,
       folderPath: d.folderPath,
       mimeType: d.mimeType,
       fileUrl: d.fileUrl,
@@ -1262,6 +1376,8 @@ function apiGetStatus() {
     lastScan: lastScan,
     autoScan: hasAutoScanTrigger(),
     docTypes: getDocTypes(),
+    issuers: getIssuers(),
+    issuerLevels: getIssuerLevels(),
     totalDocs: countDocs_(),
     visionEnabled: hasVisionKey_(),
     userEmail: Session.getActiveUser().getEmail()
@@ -1313,6 +1429,7 @@ function apiGetStats() {
   var docs = readAllDocs();
   var byType = {};
   var byYear = {};
+  var byLevel = {};
   var typeNames = {};
   getDocTypes().forEach(function (t) { typeNames[t.code] = t.name; });
 
@@ -1321,6 +1438,8 @@ function apiGetStats() {
     byType[code] = (byType[code] || 0) + 1;
     var year = (d.issuedDate || '').substring(0, 4) || 'Không rõ';
     byYear[year] = (byYear[year] || 0) + 1;
+    var level = d.issuerLevel || 'Chưa rõ';
+    byLevel[level] = (byLevel[level] || 0) + 1;
   });
 
   var typeStats = Object.keys(byType).map(function (code) {
@@ -1331,7 +1450,11 @@ function apiGetStats() {
     return { year: y, count: byYear[y] };
   }).sort(function (a, b) { return a.year < b.year ? 1 : -1; });
 
-  return { total: docs.length, byType: typeStats, byYear: yearStats };
+  var levelStats = Object.keys(byLevel).map(function (l) {
+    return { level: l, count: byLevel[l] };
+  }).sort(function (a, b) { return b.count - a.count; });
+
+  return { total: docs.length, byType: typeStats, byYear: yearStats, byLevel: levelStats };
 }
 
 /**
@@ -1363,6 +1486,21 @@ function apiSaveDocTypes(docTypes) {
 function apiResetDocTypes() {
   PropertiesService.getScriptProperties().deleteProperty(PROP_DOC_TYPES);
   return getDocTypes();
+}
+
+/**
+ * Lưu danh mục đơn vị ban hành tuỳ biến.
+ */
+function apiSaveIssuers(issuers) {
+  return saveIssuers(issuers);
+}
+
+/**
+ * Đặt lại danh mục đơn vị ban hành về mặc định.
+ */
+function apiResetIssuers() {
+  PropertiesService.getScriptProperties().deleteProperty(PROP_ISSUERS);
+  return getIssuers();
 }
 
 /**
