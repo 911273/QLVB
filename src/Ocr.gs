@@ -20,9 +20,21 @@ function extractContent(fileId, mimeType) {
       return { text: convertToDocAndRead_(fileId, mimeType, null), status: 'ok' };
     }
     if (OCR_MIME_TYPES.indexOf(mimeType) !== -1) {
-      // Bỏ qua OCR nếu file quá lớn để tránh treo/timeout; vẫn lập chỉ mục theo tên file.
       var size = 0;
       try { size = DriveApp.getFileById(fileId).getSize(); } catch (e) { size = 0; }
+
+      // Ưu tiên OCR nâng cao Vision (chất lượng tiếng Việt cao) nếu đã cấu hình API key.
+      if (hasVisionKey_() && size <= VISION_MAX_BYTES) {
+        try {
+          var vtext = ocrWithVision_(fileId, mimeType);
+          if (vtext && vtext.trim()) return { text: vtext, status: 'ok-vision' };
+        } catch (ve) {
+          Logger.log('Vision OCR fallback for ' + fileId + ': ' + ve);
+          // rơi xuống Drive OCR bên dưới
+        }
+      }
+
+      // Bỏ qua OCR nếu file quá lớn để tránh treo/timeout; vẫn lập chỉ mục theo tên file.
       if (size > MAX_OCR_BYTES) {
         return { text: '', status: 'skip-large' };
       }

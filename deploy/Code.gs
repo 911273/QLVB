@@ -1,7 +1,7 @@
 /*************************************************************************
  * QLVB-EPU - FILE MÃ NGUỒN GỘP (dán toàn bộ vào 1 file Code.gs)
  * Hệ thống Quản lý Văn bản - Trường Đại học Điện lực
- * Gồm: Config + Storage + Classifier + Ocr + Scanner + Search + Code
+ * Gồm: Config + Storage + Classifier + Vision + Ocr + Scanner + Search + Code
  *************************************************************************/
 
 /* ===================== Config.gs ===================== */
@@ -27,6 +27,16 @@ var DB_SHEET_LOG = 'NhatKy';     // Sheet nhật ký quét
 
 // Ngôn ngữ OCR (Google OCR). 'vi' = Tiếng Việt.
 var OCR_LANGUAGE = 'vi';
+
+// ===== OCR nâng cao bằng Google Cloud Vision API (chất lượng tiếng Việt cao) =====
+// API key được lưu trong Script Properties (khoá dưới đây), nhập ở màn hình Cài đặt.
+var PROP_VISION_API_KEY = 'VISION_API_KEY';
+// Gợi ý ngôn ngữ cho Vision (giúp nhận dạng dấu tiếng Việt chính xác hơn).
+var VISION_LANGUAGE_HINTS = ['vi', 'en'];
+// Số trang tối đa mỗi PDF khi OCR đồng bộ qua Vision (giới hạn của files:annotate là 5).
+var VISION_PDF_MAX_PAGES = 5;
+// Không gửi lên Vision nếu file lớn hơn mức này (giới hạn kích thước request ~ dưới 20MB).
+var VISION_MAX_BYTES = 18 * 1024 * 1024;
 
 // Kích thước tối đa (byte) cho phép OCR. File lớn hơn sẽ bị bỏ qua OCR
 // (vì Google OCR dễ thất bại/timeout với PDF scan rất lớn) nhưng VẪN được lập chỉ mục
@@ -537,6 +547,138 @@ function extractTitle(fileName, content) {
 }
 
 
+/* ===================== Vision.gs ===================== */
+/**
+ * Vision.gs
+ * OCR nâng cao dùng Google Cloud Vision API (DOCUMENT_TEXT_DETECTION),
+ * cho chất lượng nhận dạng tiếng Việt cao hơn nhiều so với OCR tích hợp của Drive.
+ *
+ * Cần: 1 API key của Google Cloud Vision (bật Vision API + billing trên GCP).
+ * Nhập API key ở màn hình Cài đặt. Nếu chưa nhập, hệ thống tự dùng Drive OCR.
+ */
+
+function getVisionApiKey_() {
+  return PropertiesService.getScriptProperties().getProperty(PROP_VISION_API_KEY) || '';
+}
+
+function hasVisionKey_() {
+  return !!getVisionApiKey_();
+}
+
+function setVisionApiKey(key) {
+  var props = PropertiesService.getScriptProperties();
+  if (key && key.trim()) {
+    props.setProperty(PROP_VISION_API_KEY, key.trim());
+  } else {
+    props.deleteProperty(PROP_VISION_API_KEY);
+  }
+  return hasVisionKey_();
+}
+
+/**
+ * OCR 1 file (ảnh hoặc PDF) bằng Vision. Trả về text.
+ * Ném lỗi nếu thất bại (để tầng gọi có thể fallback về Drive OCR).
+ */
+function ocrWithVision_(fileId, mimeType) {
+  var key = getVisionApiKey_();
+  if (!key) throw new Error('Chưa cấu hình Vision API key.');
+
+  var file = DriveApp.getFileById(fileId);
+  var size = file.getSize();
+  if (size > VISION_MAX_BYTES) {
+    throw new Error('File quá lớn cho Vision (' + Math.round(size / 1048576) + 'MB).');
+  }
+  var blob = file.getBlob();
+  var b64 = Utilities.base64Encode(blob.getBytes());
+
+  if (mimeType === SUPPORTED_MIME.PDF || mimeType === SUPPORTED_MIME.TIFF) {
+    return visionAnnotateFile_(b64, mimeType, key);
+  }
+  return visionAnnotateImage_(b64, key);
+}
+
+/**
+ * Ảnh (PNG/JPG/GIF): images:annotate (đồng bộ).
+ */
+function visionAnnotateImage_(b64, key) {
+  var url = 'https://vision.googleapis.com/v1/images:annotate?key=' + encodeURIComponent(key);
+  var payload = {
+    requests: [{
+      image: { content: b64 },
+      features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
+      imageContext: { languageHints: VISION_LANGUAGE_HINTS }
+    }]
+  };
+  var res = visionFetch_(url, payload);
+  var r = res.responses && res.responses[0];
+  if (r && r.error) throw new Error('Vision: ' + r.error.message);
+  return (r && r.fullTextAnnotation && r.fullTextAnnotation.text) || '';
+}
+
+/**
+ * PDF/TIFF: files:annotate (đồng bộ, tối đa VISION_PDF_MAX_PAGES trang đầu).
+ */
+function visionAnnotateFile_(b64, mimeType, key) {
+  var url = 'https://vision.googleapis.com/v1/files:annotate?key=' + encodeURIComponent(key);
+  var pages = [];
+  for (var i = 1; i <= VISION_PDF_MAX_PAGES; i++) pages.push(i);
+  var payload = {
+    requests: [{
+      inputConfig: { content: b64, mimeType: mimeType },
+      features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
+      imageContext: { languageHints: VISION_LANGUAGE_HINTS },
+      pages: pages
+    }]
+  };
+  var res = visionFetch_(url, payload);
+  var top = res.responses && res.responses[0];
+  if (top && top.error) throw new Error('Vision: ' + top.error.message);
+  // files:annotate trả responses[0].responses[] cho từng trang
+  var pageResponses = (top && top.responses) || [];
+  var texts = [];
+  for (var p = 0; p < pageResponses.length; p++) {
+    var pr = pageResponses[p];
+    if (pr && pr.fullTextAnnotation && pr.fullTextAnnotation.text) {
+      texts.push(pr.fullTextAnnotation.text);
+    }
+  }
+  return texts.join('\n');
+}
+
+function visionFetch_(url, payload) {
+  var resp = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+  var code = resp.getResponseCode();
+  var body = resp.getContentText();
+  if (code < 200 || code >= 300) {
+    var msg = body;
+    try { msg = JSON.parse(body).error.message; } catch (e) {}
+    throw new Error('Vision API lỗi ' + code + ': ' + msg);
+  }
+  return JSON.parse(body);
+}
+
+/**
+ * Kiểm tra nhanh API key có hợp lệ không (gọi 1 ảnh trắng nhỏ).
+ */
+function testVisionKey() {
+  var key = getVisionApiKey_();
+  if (!key) return { ok: false, message: 'Chưa nhập API key.' };
+  // ảnh PNG 1x1 trong suốt (base64)
+  var onePx = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  try {
+    visionAnnotateImage_(onePx, key);
+    return { ok: true, message: 'API key hợp lệ. OCR nâng cao đã sẵn sàng.' };
+  } catch (e) {
+    return { ok: false, message: String(e && e.message || e) };
+  }
+}
+
+
 /* ===================== Ocr.gs ===================== */
 /**
  * Ocr.gs
@@ -560,9 +702,21 @@ function extractContent(fileId, mimeType) {
       return { text: convertToDocAndRead_(fileId, mimeType, null), status: 'ok' };
     }
     if (OCR_MIME_TYPES.indexOf(mimeType) !== -1) {
-      // Bỏ qua OCR nếu file quá lớn để tránh treo/timeout; vẫn lập chỉ mục theo tên file.
       var size = 0;
       try { size = DriveApp.getFileById(fileId).getSize(); } catch (e) { size = 0; }
+
+      // Ưu tiên OCR nâng cao Vision (chất lượng tiếng Việt cao) nếu đã cấu hình API key.
+      if (hasVisionKey_() && size <= VISION_MAX_BYTES) {
+        try {
+          var vtext = ocrWithVision_(fileId, mimeType);
+          if (vtext && vtext.trim()) return { text: vtext, status: 'ok-vision' };
+        } catch (ve) {
+          Logger.log('Vision OCR fallback for ' + fileId + ': ' + ve);
+          // rơi xuống Drive OCR bên dưới
+        }
+      }
+
+      // Bỏ qua OCR nếu file quá lớn để tránh treo/timeout; vẫn lập chỉ mục theo tên file.
       if (size > MAX_OCR_BYTES) {
         return { text: '', status: 'skip-large' };
       }
@@ -1000,6 +1154,7 @@ function apiGetStatus() {
     autoScan: hasAutoScanTrigger(),
     docTypes: getDocTypes(),
     totalDocs: countDocs_(),
+    visionEnabled: hasVisionKey_(),
     userEmail: Session.getActiveUser().getEmail()
   };
 }
@@ -1099,6 +1254,21 @@ function apiSaveDocTypes(docTypes) {
 function apiResetDocTypes() {
   PropertiesService.getScriptProperties().deleteProperty(PROP_DOC_TYPES);
   return getDocTypes();
+}
+
+/**
+ * Lưu Vision API key (OCR nâng cao). Truyền rỗng để xoá.
+ */
+function apiSetVisionKey(key) {
+  var enabled = setVisionApiKey(key);
+  return { ok: true, visionEnabled: enabled };
+}
+
+/**
+ * Kiểm tra Vision API key.
+ */
+function apiTestVision() {
+  return testVisionKey();
 }
 
 /**

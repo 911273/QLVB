@@ -21,6 +21,16 @@ var DB_SHEET_LOG = 'NhatKy';     // Sheet nhật ký quét
 // Ngôn ngữ OCR (Google OCR). 'vi' = Tiếng Việt.
 var OCR_LANGUAGE = 'vi';
 
+// ===== OCR nâng cao bằng Google Cloud Vision API (chất lượng tiếng Việt cao) =====
+// API key được lưu trong Script Properties (khoá dưới đây), nhập ở màn hình Cài đặt.
+var PROP_VISION_API_KEY = 'VISION_API_KEY';
+// Gợi ý ngôn ngữ cho Vision (giúp nhận dạng dấu tiếng Việt chính xác hơn).
+var VISION_LANGUAGE_HINTS = ['vi', 'en'];
+// Số trang tối đa mỗi PDF khi OCR đồng bộ qua Vision (giới hạn của files:annotate là 5).
+var VISION_PDF_MAX_PAGES = 5;
+// Không gửi lên Vision nếu file lớn hơn mức này (giới hạn kích thước request ~ dưới 20MB).
+var VISION_MAX_BYTES = 18 * 1024 * 1024;
+
 // Kích thước tối đa (byte) cho phép OCR. File lớn hơn sẽ bị bỏ qua OCR
 // (vì Google OCR dễ thất bại/timeout với PDF scan rất lớn) nhưng VẪN được lập chỉ mục
 // dựa trên tên file. Mặc định 15 MB. PDF nhiều trang nên tách nhỏ để OCR được.

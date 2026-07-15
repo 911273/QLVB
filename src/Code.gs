@@ -57,6 +57,7 @@ function apiGetStatus() {
     autoScan: hasAutoScanTrigger(),
     docTypes: getDocTypes(),
     totalDocs: countDocs_(),
+    visionEnabled: hasVisionKey_(),
     userEmail: Session.getActiveUser().getEmail()
   };
 }
@@ -156,6 +157,21 @@ function apiSaveDocTypes(docTypes) {
 function apiResetDocTypes() {
   PropertiesService.getScriptProperties().deleteProperty(PROP_DOC_TYPES);
   return getDocTypes();
+}
+
+/**
+ * Lưu Vision API key (OCR nâng cao). Truyền rỗng để xoá.
+ */
+function apiSetVisionKey(key) {
+  var enabled = setVisionApiKey(key);
+  return { ok: true, visionEnabled: enabled };
+}
+
+/**
+ * Kiểm tra Vision API key.
+ */
+function apiTestVision() {
+  return testVisionKey();
 }
 
 /**

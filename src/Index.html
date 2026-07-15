@@ -133,6 +133,26 @@
           <div id="sysInfo" class="sys-info"></div>
         </div>
         <div class="card">
+          <h3>OCR nâng cao (Google Cloud Vision) — chất lượng tiếng Việt cao</h3>
+          <p class="muted">OCR tích hợp của Drive nhận dạng tiếng Việt kém. Nhập <b>Google Cloud Vision API key</b> để dùng động cơ OCR chất lượng cao (giữ đúng dấu). Nếu để trống, hệ thống dùng Drive OCR.</p>
+          <div id="visionStatus" class="muted" style="margin-bottom:8px"></div>
+          <div class="form-row">
+            <input type="password" id="visionKey" class="input grow" placeholder="Dán Vision API key (AIza...)" autocomplete="off">
+            <button class="btn btn-primary" id="btnSaveVision">Lưu key</button>
+            <button class="btn" id="btnTestVision">Kiểm tra</button>
+            <button class="btn" id="btnClearVision">Xoá key</button>
+          </div>
+          <details style="margin-top:8px">
+            <summary class="muted" style="cursor:pointer">Cách lấy API key (bấm để xem)</summary>
+            <ol class="muted" style="line-height:1.7">
+              <li>Vào <b>console.cloud.google.com</b> → tạo project (hoặc chọn project có sẵn).</li>
+              <li>Bật <b>Cloud Vision API</b> (APIs &amp; Services → Enable APIs → tìm "Cloud Vision API" → Enable). Cần bật <b>Billing</b> cho project (Vision có mức miễn phí 1.000 trang/tháng).</li>
+              <li>APIs &amp; Services → <b>Credentials</b> → Create credentials → <b>API key</b> → copy dán vào ô trên.</li>
+              <li>(Khuyến nghị) Hạn chế API key chỉ cho <b>Cloud Vision API</b> để an toàn.</li>
+            </ol>
+          </details>
+        </div>
+        <div class="card">
           <h3>Loại văn bản</h3>
           <p class="muted">Danh sách loại VB dùng để tự động phân loại. Từ khoá cách nhau bởi dấu phẩy.</p>
           <table class="types-table" id="typesTable"></table>

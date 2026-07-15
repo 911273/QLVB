@@ -9,7 +9,9 @@ Không cần server riêng, không cần cơ sở dữ liệu ngoài, không t�
 - 🔄 **Tự động quét & cập nhật** văn bản trong folder Drive (kể cả folder con), thủ công hoặc theo lịch định kỳ.
 - 🏷️ **Tự động phân loại** dựa trên tên file và nội dung; tự trích **số/ký hiệu** và **ngày ban hành**.
 - 🔎 **Tìm kiếm** theo tên, số hiệu, loại, khoảng ngày và **tìm trong nội dung** văn bản.
-- 🔤 **OCR** ảnh scan và PDF bằng chính công cụ OCR của Google (không dùng dịch vụ bên thứ ba).
+- 🔤 **OCR** ảnh scan và PDF bằng công cụ OCR của Google. Hai mức:
+  - *Mặc định*: Drive OCR (không cần cấu hình, nhưng tiếng Việt kém).
+  - *Nâng cao*: **Google Cloud Vision API** — chất lượng tiếng Việt cao (giữ đúng dấu). Nhập API key trong tab **Cài đặt**. Xem hướng dẫn lấy key ngay trong app.
 - 📊 Trang **tổng quan** thống kê theo loại và theo năm.
 
 ## Kiến trúc

@@ -66,7 +66,7 @@ function bindTabs() {
       $('#tab-' + tab.dataset.tab).classList.add('active');
       if (tab.dataset.tab === 'list') loadList(1);
       if (tab.dataset.tab === 'overview') loadStats();
-      if (tab.dataset.tab === 'settings') renderTypesTable();
+      if (tab.dataset.tab === 'settings') { renderTypesTable(); renderVisionStatus(); }
       if (tab.dataset.tab === 'scan') loadUploadHint();
     });
   });
@@ -86,6 +86,9 @@ function bindActions() {
   $('#btnAddType').addEventListener('click', addTypeRow);
   $('#btnSaveTypes').addEventListener('click', saveTypes);
   $('#btnResetTypes').addEventListener('click', resetTypes);
+  $('#btnSaveVision').addEventListener('click', saveVision);
+  $('#btnTestVision').addEventListener('click', testVision);
+  $('#btnClearVision').addEventListener('click', clearVision);
   $('#modalClose').addEventListener('click', closeModal);
   $('#modal').addEventListener('click', function (e) { if (e.target.id === 'modal') closeModal(); });
 }
@@ -247,6 +250,7 @@ function renderResults(sel, res, keyword) {
 }
 function ocrLabel(s) {
   if (s === 'ok') return 'Đã trích xuất';
+  if (s === 'ok-vision') return 'OCR nâng cao (Vision)';
   if (s === 'skip') return 'Không OCR';
   if (s === 'skip-large') return 'File quá lớn - bỏ OCR';
   if (s === 'error') return 'Lỗi OCR';
@@ -392,6 +396,7 @@ function renderSysInfo() {
     row('Cơ sở dữ liệu', dbHtml) +
     row('Tổng văn bản', esc(st.totalDocs || 0)) +
     row('Tự động quét', st.autoScan ? '<span class="tag ok">Đang bật</span>' : '<span class="tag skip">Tắt</span>') +
+    row('Động cơ OCR', st.visionEnabled ? '<span class="tag ok">Vision (nâng cao)</span>' : '<span class="tag skip">Drive OCR (cơ bản)</span>') +
     row('Quét gần nhất', fmtDateTime(st.lastScan));
 }
 
@@ -447,6 +452,48 @@ function resetTypes() {
     renderTypesTable();
     showLoading(false);
     toast('Đã khôi phục danh sách mặc định.', 'ok');
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+/* ============ OCR nâng cao (Vision) ============ */
+function renderVisionStatus() {
+  var st = STATE.status || {};
+  var box = $('#visionStatus');
+  if (!box) return;
+  if (st.visionEnabled) {
+    box.innerHTML = 'Động cơ OCR hiện tại: <b>Google Cloud Vision (nâng cao)</b> <span class="tag ok">Đang bật</span>';
+  } else {
+    box.innerHTML = 'Động cơ OCR hiện tại: <b>Drive OCR (cơ bản)</b> <span class="tag skip">Chưa bật Vision</span>';
+  }
+}
+function saveVision() {
+  var key = $('#visionKey').value.trim();
+  if (!key) { toast('Hãy dán API key trước.', 'err'); return; }
+  showLoading(true, 'Đang lưu API key...');
+  call('apiSetVisionKey', key).then(function (r) {
+    showLoading(false);
+    if (STATE.status) STATE.status.visionEnabled = r.visionEnabled;
+    $('#visionKey').value = '';
+    renderVisionStatus();
+    renderSysInfo();
+    toast('Đã lưu API key. Bấm "Kiểm tra" để xác nhận, rồi "Quét lại toàn bộ" để OCR lại.', 'ok');
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+function testVision() {
+  showLoading(true, 'Đang kiểm tra API key...');
+  call('apiTestVision').then(function (r) {
+    showLoading(false);
+    toast(r.message, r.ok ? 'ok' : 'err');
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+function clearVision() {
+  showLoading(true, 'Đang xoá API key...');
+  call('apiSetVisionKey', '').then(function (r) {
+    showLoading(false);
+    if (STATE.status) STATE.status.visionEnabled = r.visionEnabled;
+    renderVisionStatus();
+    renderSysInfo();
+    toast('Đã xoá API key. Quay lại dùng Drive OCR.', 'ok');
   }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
 }
 </script>
