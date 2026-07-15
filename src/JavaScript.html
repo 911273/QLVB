@@ -251,6 +251,7 @@ function renderResults(sel, res, keyword) {
 function ocrLabel(s) {
   if (s === 'ok') return 'Đã trích xuất';
   if (s === 'ok-vision') return 'OCR nâng cao (Vision)';
+  if (s === 'manual') return 'Đã sửa tay';
   if (s === 'skip') return 'Không OCR';
   if (s === 'skip-large') return 'File quá lớn - bỏ OCR';
   if (s === 'error') return 'Lỗi OCR';
@@ -309,15 +310,65 @@ function openDetail(fileId) {
       '</div>' +
       '<div class="form-row" style="margin-top:14px">' +
         '<a class="btn btn-primary" href="' + esc(d.fileUrl) + '" target="_blank">Mở trên Drive</a>' +
+        '<button class="btn" id="btnEditDoc">✎ Sửa thông tin</button>' +
         '<button class="btn" id="btnReOcr">OCR lại</button>' +
       '</div>' +
       '<h3 style="margin-top:16px">Nội dung trích xuất</h3>' +
-      '<div class="detail-content">' + (d.content ? esc(d.content) : '<i>Chưa có nội dung. Nhấn "OCR lại" để trích xuất.</i>') + '</div>';
+      '<div class="detail-content">' + (d.content ? esc(d.content) : '<i>Chưa có nội dung. Nhấn "OCR lại" để trích xuất, hoặc "Sửa thông tin" để nhập tay.</i>') + '</div>';
     $('#modalContent').innerHTML = html;
     $('#modal').classList.remove('hidden');
     var btn = $('#btnReOcr');
     if (btn) btn.addEventListener('click', function () { doReOcr(d.fileId); });
+    var btnE = $('#btnEditDoc');
+    if (btnE) btnE.addEventListener('click', function () { openEditForm(d); });
   }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+/* ============ Sửa thông tin bằng tay ============ */
+function openEditForm(d) {
+  var typeOpts = (STATE.docTypes || []).map(function (t) {
+    return '<option value="' + esc(t.code) + '"' + (t.code === d.docTypeCode ? ' selected' : '') + '>' + esc(t.name) + '</option>';
+  }).join('');
+  typeOpts += '<option value="KHAC"' + (d.docTypeCode === 'KHAC' ? ' selected' : '') + '>Khác</option>';
+
+  var html =
+    '<h2>Sửa thông tin văn bản</h2>' +
+    '<p class="muted">Tên file: ' + esc(d.fileName) + '</p>' +
+    '<div class="edit-grid">' +
+      '<label>Loại văn bản<select id="edType" class="input">' + typeOpts + '</select></label>' +
+      '<label>Số/Ký hiệu<input id="edNumber" class="input" value="' + esc(d.docNumber || '') + '" placeholder="VD: 510/QĐ-ĐHĐL"></label>' +
+      '<label>Ngày ban hành<input id="edDate" type="date" class="input" value="' + esc((d.issuedDate || '').substring(0,10)) + '"></label>' +
+      '<label class="full">Trích yếu / Tiêu đề<input id="edTitle" class="input" value="' + esc(d.title || '') + '"></label>' +
+      '<label class="full">Nội dung (sửa nếu OCR sai/thiếu)<textarea id="edContent" class="input" rows="10">' + esc(d.content || '') + '</textarea></label>' +
+    '</div>' +
+    '<div class="form-row" style="margin-top:14px">' +
+      '<button class="btn btn-primary" id="btnSaveEdit">Lưu thay đổi</button>' +
+      '<button class="btn" id="btnCancelEdit">Huỷ</button>' +
+    '</div>' +
+    '<p class="muted" style="margin-top:8px">Sau khi lưu, văn bản được đánh dấu <b>"Đã sửa tay"</b> và sẽ <b>không bị ghi đè</b> khi quét lại. Muốn OCR lại đè lên, mở chi tiết và bấm "OCR lại".</p>';
+  $('#modalContent').innerHTML = html;
+  $('#modal').classList.remove('hidden');
+  $('#btnCancelEdit').addEventListener('click', function () { openDetail(d.fileId); });
+  $('#btnSaveEdit').addEventListener('click', function () { saveEdit(d.fileId); });
+}
+
+function saveEdit(fileId) {
+  var payload = {
+    fileId: fileId,
+    docTypeCode: $('#edType').value,
+    docNumber: $('#edNumber').value.trim(),
+    issuedDate: $('#edDate').value,
+    title: $('#edTitle').value.trim(),
+    content: $('#edContent').value
+  };
+  showLoading(true, 'Đang lưu...');
+  call('apiUpdateDoc', payload).then(function () {
+    showLoading(false);
+    toast('Đã lưu thay đổi.', 'ok');
+    openDetail(fileId);
+    // làm mới danh sách/thống kê nếu đang mở
+    loadStats();
+  }).catch(function (err) { showLoading(false); toast('Lỗi lưu: ' + (err.message || err), 'err'); });
 }
 function row(k, v) { return '<div class="k">' + k + '</div><div>' + v + '</div>'; }
 function closeModal() { $('#modal').classList.add('hidden'); }

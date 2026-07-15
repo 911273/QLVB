@@ -29,6 +29,13 @@ function scanDrive(options) {
     livingIds[f.id] = true;
 
     var hit = existing[f.id];
+
+    // Giữ nguyên văn bản đã sửa tay (kể cả khi quét lại toàn bộ) để không mất chỉnh sửa.
+    if (hit && hit.ocrStatus === 'manual') {
+      stats.skipped++;
+      continue;
+    }
+
     var changed = !hit || Number(hit.modifiedTime) !== Number(f.modifiedTime);
 
     if (!force && !changed) {

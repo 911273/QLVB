@@ -141,6 +141,14 @@
   .tag.error { background: #fce8e6; color: var(--err); }
   .tag.skip-large { background: #fef7e0; color: var(--warn); }
   .tag.ok-vision { background: #e6f4ea; color: var(--ok); }
+  .tag.manual { background: #e8f0fe; color: var(--primary-dark); }
+
+  /* Form sửa tay */
+  .edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .edit-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .edit-grid label.full { grid-column: 1 / -1; }
+  .edit-grid textarea.input { resize: vertical; font-family: inherit; line-height: 1.5; }
+  @media (max-width: 640px){ .edit-grid { grid-template-columns: 1fr; } }
 
   .pager { display: flex; gap: 6px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
   .pager button { min-width: 34px; }

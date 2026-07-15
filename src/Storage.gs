@@ -158,7 +158,8 @@ function getExistingIndex_() {
   for (var i = 0; i < values.length; i++) {
     map[values[i][COLS.FILE_ID]] = {
       rowIndex: i + 2,
-      modifiedTime: values[i][COLS.MODIFIED_TIME]
+      modifiedTime: values[i][COLS.MODIFIED_TIME],
+      ocrStatus: values[i][COLS.OCR_STATUS]
     };
   }
   return map;
@@ -217,6 +218,51 @@ function removeDeletedDocs_(livingIds) {
   }
   return toDelete.length;
 }
+
+/**
+ * Cập nhật thông tin văn bản bằng tay (khi OCR sai/thiếu).
+ * p: { fileId, docTypeCode, docNumber, issuedDate, title, content }
+ * Chỉ cập nhật các trường được truyền vào (khác undefined).
+ * Đặt ocrStatus='manual' để lần quét sau KHÔNG ghi đè bản sửa tay.
+ */
+function updateDocManual(p) {
+  if (!p || !p.fileId) throw new Error('Thiếu mã văn bản (fileId).');
+  var docs = readAllDocs();
+  var existing = getExistingIndex_();
+  var cur = null;
+  for (var i = 0; i < docs.length; i++) {
+    if (docs[i].fileId === p.fileId) { cur = docs[i]; break; }
+  }
+  if (!cur) throw new Error('Không tìm thấy văn bản trong cơ sở dữ liệu.');
+
+  if (p.docTypeCode != null && p.docTypeCode !== '') {
+    cur.docTypeCode = p.docTypeCode;
+    cur.docType = getTypeName_(p.docTypeCode);
+  }
+  if (p.docNumber != null) cur.docNumber = String(p.docNumber);
+  if (p.issuedDate != null) cur.issuedDate = normalizeDateInput_(p.issuedDate);
+  if (p.title != null) cur.title = String(p.title);
+  if (p.content != null) cur.content = String(p.content).substring(0, 45000);
+
+  cur.ocrStatus = 'manual';
+  cur.scannedAt = new Date().toISOString();
+  upsertDoc_(cur, existing);
+  writeLog_('Sửa tay', 1, cur.fileName);
+  return cur;
+}
+
+// Chuẩn hoá ngày nhập tay về 'yyyy-MM-dd' (chấp nhận rỗng).
+function normalizeDateInput_(v) {
+  if (!v) return '';
+  if (v instanceof Date) return Utilities.formatDate(v, 'Asia/Ho_Chi_Minh', 'yyyy-MM-dd');
+  var s = String(v).trim();
+  var m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+  if (m) return m[1] + '-' + pad2_(m[2]) + '-' + pad2_(m[3]);
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/); // dd/mm/yyyy
+  if (m) return m[3] + '-' + pad2_(m[2]) + '-' + pad2_(m[1]);
+  return s.substring(0, 10);
+}
+function pad2_(n) { n = parseInt(n, 10); return n < 10 ? '0' + n : '' + n; }
 
 function writeLog_(action, count, note) {
   try {

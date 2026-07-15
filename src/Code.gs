@@ -160,6 +160,13 @@ function apiResetDocTypes() {
 }
 
 /**
+ * Cập nhật thông tin văn bản bằng tay (OCR sai/thiếu).
+ */
+function apiUpdateDoc(payload) {
+  return updateDocManual(payload);
+}
+
+/**
  * Lưu Vision API key (OCR nâng cao). Truyền rỗng để xoá.
  */
 function apiSetVisionKey(key) {

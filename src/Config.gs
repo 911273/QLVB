@@ -110,6 +110,18 @@ function getDocTypes() {
 }
 
 /**
+ * Tra tên loại VB theo mã. Trả về 'Khác' nếu không tìm thấy.
+ */
+function getTypeName_(code) {
+  if (!code) return 'Khác';
+  var types = getDocTypes();
+  for (var i = 0; i < types.length; i++) {
+    if (types[i].code === code) return types[i].name;
+  }
+  return code === 'KHAC' ? 'Khác' : code;
+}
+
+/**
  * Lưu danh sách loại VB tuỳ biến.
  */
 function saveDocTypes(docTypes) {
