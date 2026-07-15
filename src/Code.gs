@@ -10,11 +10,32 @@
  */
 function doGet(e) {
   var tpl = HtmlService.createTemplateFromFile('Index');
+  tpl.logoUri = getLogoDataUri_(); // logo.png trong folder gốc (nếu có), dạng data URI
   return tpl.evaluate()
     .setTitle('QLVB - Đại học Điện lực')
     .setFaviconUrl('https://ssl.gstatic.com/docs/script/images/favicon.ico')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/**
+ * Đọc logo (logo.png/.jpg...) trong folder gốc trên Drive -> data URI để nhúng vào trang.
+ * Trả '' nếu chưa có (giao diện sẽ dùng logo SVG dự phòng).
+ */
+function getLogoDataUri_() {
+  try {
+    var folder = getExistingRootFolder_();
+    if (!folder) return '';
+    var names = ['logo.png', 'logo.jpg', 'logo.jpeg', 'logo.gif', 'logo.webp'];
+    for (var i = 0; i < names.length; i++) {
+      var it = folder.getFilesByName(names[i]);
+      if (it.hasNext()) {
+        var blob = it.next().getBlob();
+        return 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes());
+      }
+    }
+  } catch (e) { /* bỏ qua, dùng logo dự phòng */ }
+  return '';
 }
 
 /**

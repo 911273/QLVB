@@ -10,6 +10,9 @@
   <div id="loginScreen" class="login-screen">
     <div class="login-box">
       <div class="login-logo">
+        <? if (logoUri) { ?>
+        <img class="epu-mark" src="<?= logoUri ?>" alt="EPU">
+        <? } else { ?>
         <svg class="epu-mark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-label="EPU">
           <path d="M78 22 A38 38 0 1 0 78 78" fill="none" stroke="#0e5aa7" stroke-width="12"/>
           <g transform="rotate(-18 50 50)" stroke-linecap="round">
@@ -21,6 +24,7 @@
             <line x1="21" y1="64" x2="81" y2="64" stroke="#ffffff" stroke-width="1.4"/>
           </g>
         </svg>
+        <? } ?>
       </div>
       <h1>Hệ thống Quản lý Văn bản</h1>
       <p class="login-sub">Trường Đại học Điện lực — Đăng nhập</p>
@@ -41,6 +45,9 @@
     <header class="topbar">
       <div class="brand">
         <div class="logo">
+          <? if (logoUri) { ?>
+          <img class="epu-mark" src="<?= logoUri ?>" alt="EPU">
+          <? } else { ?>
           <svg class="epu-mark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-label="EPU">
             <path d="M78 22 A38 38 0 1 0 78 78" fill="none" stroke="#0e5aa7" stroke-width="12"/>
             <g transform="rotate(-18 50 50)" stroke-linecap="round">
@@ -52,6 +59,7 @@
               <line x1="21" y1="64" x2="81" y2="64" stroke="#ffffff" stroke-width="1.4"/>
             </g>
           </svg>
+          <? } ?>
         </div>
         <div class="brand-text">
           <h1>Hệ thống Quản lý Văn bản</h1>

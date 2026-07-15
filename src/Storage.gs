@@ -51,6 +51,15 @@ function getOrCreateRootFolder() {
 }
 
 /**
+ * Trả về folder gốc nếu đã cấu hình & còn tồn tại; KHÔNG tạo mới. Trả null nếu chưa có.
+ */
+function getExistingRootFolder_() {
+  var id = PropertiesService.getScriptProperties().getProperty(PROP_ROOT_FOLDER_ID);
+  if (!id) return null;
+  try { return DriveApp.getFolderById(id); } catch (e) { return null; }
+}
+
+/**
  * Trả về Spreadsheet database; tự tạo nếu chưa có.
  */
 function getOrCreateDatabase() {
