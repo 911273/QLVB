@@ -29,16 +29,16 @@
 
     <!-- Tabs -->
     <nav class="tabs">
-      <button class="tab active" data-tab="overview">Tổng quan</button>
+      <button class="tab active" data-tab="search">Tìm kiếm</button>
       <button class="tab" data-tab="list">Danh sách văn bản</button>
-      <button class="tab" data-tab="search">Tìm kiếm</button>
+      <button class="tab" data-tab="overview">Tổng quan</button>
       <button class="tab" data-tab="scan">Quét &amp; Cập nhật</button>
       <button class="tab" data-tab="settings">Cài đặt</button>
     </nav>
 
     <main class="content">
       <!-- TAB: Tổng quan -->
-      <section class="tab-panel active" id="tab-overview">
+      <section class="tab-panel" id="tab-overview">
         <div class="stat-cards" id="statCards"></div>
         <div class="two-col">
           <div class="card">
@@ -67,20 +67,29 @@
         <div id="listPager" class="pager"></div>
       </section>
 
-      <!-- TAB: Tìm kiếm -->
-      <section class="tab-panel" id="tab-search">
+      <!-- TAB: Tìm kiếm (mặc định) -->
+      <section class="tab-panel active" id="tab-search">
         <div class="search-form card">
           <div class="form-row">
-            <input type="text" id="sKeyword" class="input grow" placeholder="Nhập từ khoá (tên, số hiệu, nội dung...)">
+            <input type="text" id="sKeyword" class="input grow" placeholder="Nhập từ khoá (tên, số hiệu, trích yếu, nội dung, đơn vị...)">
             <button class="btn btn-primary" id="btnSearch">Tìm kiếm</button>
+            <button class="btn" id="btnSearchClear">Xoá lọc</button>
           </div>
           <div class="form-row">
-            <label>Loại VB
+            <label>Loại văn bản
               <select id="sType" class="input"></select>
             </label>
             <label>Cấp ban hành
               <select id="sLevel" class="input"></select>
             </label>
+            <label>Đơn vị ban hành
+              <input type="text" id="sIssuer" class="input" list="issuerListSearch" placeholder="VD: Trường Đại học Điện lực">
+            </label>
+            <label>Số/Ký hiệu
+              <input type="text" id="sNumber" class="input" placeholder="VD: 510/QĐ">
+            </label>
+          </div>
+          <div class="form-row">
             <label>Từ ngày
               <input type="date" id="sFrom" class="input">
             </label>
@@ -89,13 +98,17 @@
             </label>
             <label>Sắp xếp
               <select id="sSort" class="input">
-                <option value="issuedDate|desc">Ngày ban hành ↓</option>
-                <option value="issuedDate|asc">Ngày ban hành ↑</option>
+                <option value="issuedDate|desc">Ngày ban hành ↓ (mới nhất)</option>
+                <option value="issuedDate|asc">Ngày ban hành ↑ (cũ nhất)</option>
                 <option value="fileName|asc">Tên A→Z</option>
-                <option value="docType|asc">Loại VB</option>
+                <option value="docType|asc">Loại văn bản</option>
+                <option value="issuer|asc">Đơn vị ban hành</option>
+                <option value="issuerLevel|asc">Cấp ban hành</option>
               </select>
             </label>
           </div>
+          <datalist id="issuerListSearch"></datalist>
+          <div id="searchSummary" class="muted"></div>
         </div>
         <div id="searchResults" class="results"></div>
         <div id="searchPager" class="pager"></div>

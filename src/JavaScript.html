@@ -75,7 +75,15 @@ function bindTabs() {
 function bindActions() {
   $('#btnInit').addEventListener('click', doInitialize);
   $('#btnSearch').addEventListener('click', function () { doSearch(1); });
+  $('#btnSearchClear').addEventListener('click', clearSearch);
   $('#sKeyword').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
+  $('#sIssuer').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
+  $('#sNumber').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
+  // Đổi bộ lọc là tự tìm lại ngay.
+  ['sType', 'sLevel', 'sSort', 'sFrom', 'sTo'].forEach(function (id) {
+    var elx = document.getElementById(id);
+    if (elx) elx.addEventListener('change', function () { doSearch(1); });
+  });
   $('#btnScan').addEventListener('click', function () { doScan(false); });
   $('#btnScanForce').addEventListener('click', function () { doScan(true); });
   $('#btnListReload').addEventListener('click', function () { loadList(1); });
@@ -117,6 +125,8 @@ function loadStatus() {
     renderOcrQueue();
     loadStats();
     showLoading(false);
+    // Tìm kiếm là màn hình mặc định: tự nạp toàn bộ văn bản ngay khi mở app.
+    if (st.initialized && !STATE.searched) doSearch(1, true);
   }).catch(function (err) {
     showLoading(false);
     toast('Lỗi tải trạng thái: ' + (err.message || err), 'err');
@@ -154,12 +164,20 @@ function fillTypeSelects() {
 
 function fillLevelSelect() {
   var sel = $('#sLevel');
-  if (!sel) return;
-  var opts = '<option value="">— Tất cả cấp —</option>';
-  (STATE.issuerLevels || []).forEach(function (lv) {
-    opts += '<option value="' + esc(lv) + '">' + esc(lv) + '</option>';
-  });
-  sel.innerHTML = opts;
+  if (sel) {
+    var opts = '<option value="">— Tất cả cấp —</option>';
+    (STATE.issuerLevels || []).forEach(function (lv) {
+      opts += '<option value="' + esc(lv) + '">' + esc(lv) + '</option>';
+    });
+    sel.innerHTML = opts;
+  }
+  // Gợi ý đơn vị cho ô tìm kiếm.
+  var dl = $('#issuerListSearch');
+  if (dl) {
+    dl.innerHTML = (STATE.issuers || []).map(function (it) {
+      return '<option value="' + esc(it.name) + '">';
+    }).join('');
+  }
 }
 
 /* ============ Tổng quan ============ */
@@ -200,6 +218,7 @@ function renderBarList(sel, items) {
 /* ============ Danh sách ============ */
 function loadList(page) {
   if (!STATE.status || !STATE.status.initialized) { $('#listResults').innerHTML = notInit(); return; }
+  STATE.listPage = page || 1;
   var q = {
     keyword: $('#listKeyword').value.trim(),
     typeCode: $('#listType').value,
@@ -215,25 +234,49 @@ function loadList(page) {
 }
 
 /* ============ Tìm kiếm ============ */
-function doSearch(page) {
+function doSearch(page, silent) {
   if (!STATE.status || !STATE.status.initialized) { $('#searchResults').innerHTML = notInit(); return; }
-  var sort = $('#sSort').value.split('|');
+  STATE.searchPage = page || 1;
+  STATE.searched = true;
+  var sort = ($('#sSort').value || 'issuedDate|desc').split('|');
   var q = {
     keyword: $('#sKeyword').value.trim(),
     typeCode: $('#sType').value,
     issuerLevel: $('#sLevel').value,
+    issuer: $('#sIssuer') ? $('#sIssuer').value.trim() : '',
+    docNumber: $('#sNumber') ? $('#sNumber').value.trim() : '',
     fromDate: $('#sFrom').value,
     toDate: $('#sTo').value,
     sortBy: sort[0], sortDir: sort[1],
     page: page || 1, pageSize: 15
   };
-  showLoading(true, 'Đang tìm kiếm...');
+  if (!silent) showLoading(true, 'Đang tìm kiếm...');
   call('apiSearch', q).then(function (res) {
     renderResults('#searchResults', res, q.keyword);
     renderPager('#searchPager', res, doSearch);
+    var sum = $('#searchSummary');
+    if (sum) sum.textContent = 'Tìm thấy ' + (res.total || 0) + ' văn bản.';
     showLoading(false);
-    if (res.total === 0) toast('Không tìm thấy văn bản phù hợp.');
-  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+    if (res.total === 0 && !silent) toast('Không tìm thấy văn bản phù hợp.');
+  }).catch(function (err) { showLoading(false); if (!silent) toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+function clearSearch() {
+  ['sKeyword', 'sIssuer', 'sNumber', 'sFrom', 'sTo'].forEach(function (id) {
+    var e = document.getElementById(id); if (e) e.value = '';
+  });
+  if ($('#sType')) $('#sType').value = '';
+  if ($('#sLevel')) $('#sLevel').value = '';
+  if ($('#sSort')) $('#sSort').value = 'issuedDate|desc';
+  doSearch(1);
+}
+
+// Làm mới kết quả đang xem (sau khi sửa/OCR) mà không cần refresh trang.
+function refreshResults() {
+  var activeEl = document.querySelector('.tab.active');
+  var active = activeEl ? activeEl.dataset.tab : '';
+  if (active === 'search' || STATE.searched) doSearch(STATE.searchPage || 1, true);
+  if (active === 'list') loadList(STATE.listPage || 1);
 }
 
 function notInit() {
@@ -451,7 +494,8 @@ function saveEdit(fileId) {
     showLoading(false);
     toast('Đã lưu thay đổi.', 'ok');
     openDetail(fileId);
-    // làm mới danh sách/thống kê nếu đang mở
+    // làm mới danh sách/kết quả/thống kê ngay, không cần refresh trang
+    refreshResults();
     loadStats();
   }).catch(function (err) { showLoading(false); toast('Lỗi lưu: ' + (err.message || err), 'err'); });
 }
@@ -464,6 +508,8 @@ function doReOcr(fileId) {
     showLoading(false);
     toast('Đã OCR lại thành công.', 'ok');
     openDetail(fileId);
+    refreshResults();
+    loadStats();
   }).catch(function (err) { showLoading(false); toast('Lỗi OCR: ' + (err.message || err), 'err'); });
 }
 

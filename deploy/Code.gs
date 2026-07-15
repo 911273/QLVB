@@ -1515,9 +1515,14 @@ function searchDocs(query) {
   var kw = normalizeVi_(query.keyword || '').trim();
   var terms = kw ? kw.split(/\s+/) : [];
 
+  var issuerKw = normalizeVi_(query.issuer || '').trim();
+  var numberKw = normalizeVi_(query.docNumber || '').trim();
+
   var filtered = docs.filter(function (d) {
     if (query.typeCode && d.docTypeCode !== query.typeCode) return false;
     if (query.issuerLevel && d.issuerLevel !== query.issuerLevel) return false;
+    if (issuerKw && normalizeVi_(d.issuer || '').indexOf(issuerKw) === -1) return false;
+    if (numberKw && normalizeVi_(d.docNumber || '').indexOf(numberKw) === -1) return false;
     if (query.fromDate && (!d.issuedDate || d.issuedDate < query.fromDate)) return false;
     if (query.toDate && (!d.issuedDate || d.issuedDate > query.toDate)) return false;
     if (terms.length) {
