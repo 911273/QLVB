@@ -140,11 +140,17 @@
             </label>
           </div>
           <div class="form-row">
-            <label>Từ ngày (dd/mm/yyyy)
-              <input type="text" id="sFrom" class="input" placeholder="dd/mm/yyyy" inputmode="numeric">
+            <label>Từ ngày
+              <span class="date-field">
+                <input type="text" id="sFrom" class="input date-text" placeholder="dd/mm/yyyy" inputmode="numeric" maxlength="10">
+                <span class="date-btn">📅<input type="date" class="date-native" tabindex="-1"></span>
+              </span>
             </label>
-            <label>Đến ngày (dd/mm/yyyy)
-              <input type="text" id="sTo" class="input" placeholder="dd/mm/yyyy" inputmode="numeric">
+            <label>Đến ngày
+              <span class="date-field">
+                <input type="text" id="sTo" class="input date-text" placeholder="dd/mm/yyyy" inputmode="numeric" maxlength="10">
+                <span class="date-btn">📅<input type="date" class="date-native" tabindex="-1"></span>
+              </span>
             </label>
             <label>Sắp xếp
               <select id="sSort" class="input">

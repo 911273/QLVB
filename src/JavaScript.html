@@ -77,12 +77,43 @@ function dmyToIso(s) {
   if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(s)) return s;
   return '';
 }
+// Gõ số tự chèn dấu "/" -> dd/mm/yyyy
+function autoSlashDate_(input) {
+  var d = input.value.replace(/\D/g, '').substring(0, 8);
+  var out = d;
+  if (d.length >= 5) out = d.substring(0, 2) + '/' + d.substring(2, 4) + '/' + d.substring(4);
+  else if (d.length >= 3) out = d.substring(0, 2) + '/' + d.substring(2);
+  input.value = out;
+}
+// Kích hoạt các ô ngày (.date-field): gõ tự thêm "/" + nút 📅 mở lịch gốc.
+function initDateFields(root) {
+  var fields = (root || document).querySelectorAll('.date-field');
+  Array.prototype.forEach.call(fields, function (f) {
+    if (f.__wired) return; f.__wired = true;
+    var text = f.querySelector('.date-text');
+    var native = f.querySelector('.date-native');
+    if (!text) return;
+    text.addEventListener('input', function () { autoSlashDate_(text); });
+    if (native) {
+      // Mở lịch tại đúng ngày đang nhập (nếu có).
+      native.addEventListener('focus', function () { var iso = dmyToIso(text.value); if (iso) native.value = iso; });
+      native.addEventListener('click', function () { var iso = dmyToIso(text.value); if (iso) native.value = iso; });
+      native.addEventListener('change', function () {
+        if (native.value) {
+          text.value = isoToDmy(native.value);
+          text.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      });
+    }
+  });
+}
 
 /* ============ Khởi động ============ */
 document.addEventListener('DOMContentLoaded', function () {
   bindTabs();
   bindActions();
   bindLogin();
+  initDateFields(document);
   if (TOKEN) { loadStatus(); }
   else { showLogin(); }
 });
@@ -580,7 +611,10 @@ function openEditForm(d) {
       '<label>Số/Ký hiệu<input id="edNumber" class="input" value="' + esc(d.docNumber || '') + '" placeholder="VD: 510/QĐ-ĐHĐL"></label>' +
       '<label>Đơn vị ban hành<input id="edIssuer" class="input" list="issuerList" value="' + esc(d.issuer || '') + '" placeholder="VD: Trường Đại học Điện lực"></label>' +
       '<label>Cấp ban hành<select id="edLevel" class="input">' + levelOpts + '</select></label>' +
-      '<label>Ngày ban hành (dd/mm/yyyy)<input id="edDate" type="text" class="input" placeholder="dd/mm/yyyy" inputmode="numeric" value="' + esc(isoToDmy(d.issuedDate)) + '"></label>' +
+      '<label>Ngày ban hành<span class="date-field">' +
+        '<input id="edDate" type="text" class="input date-text" placeholder="dd/mm/yyyy" inputmode="numeric" maxlength="10" value="' + esc(isoToDmy(d.issuedDate)) + '">' +
+        '<span class="date-btn">📅<input type="date" class="date-native" tabindex="-1"></span>' +
+      '</span></label>' +
       '<label class="full">Trích yếu / Tiêu đề<input id="edTitle" class="input" value="' + esc(d.title || '') + '"></label>' +
       '<label class="full">Nội dung (sửa nếu OCR sai/thiếu)<textarea id="edContent" class="input" rows="8">' + esc(d.content || '') + '</textarea></label>' +
     '</div>' +
@@ -610,6 +644,7 @@ function openEditForm(d) {
   $('#modalContent').innerHTML = html;
   setModalWide_(!!preview);
   $('#modal').classList.remove('hidden');
+  initDateFields($('#modalContent'));
   $('#btnCancelEdit').addEventListener('click', function () { openDetail(d.fileId); });
   $('#btnSaveEdit').addEventListener('click', function () { saveEdit(d.fileId); });
   // Chọn đơn vị có sẵn -> tự điền cấp ban hành tương ứng.

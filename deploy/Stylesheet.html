@@ -143,6 +143,17 @@
     font-size: 13px; background: #fff; color: var(--text);
   }
   .input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-light); }
+  /* Ô nhập ngày trực quan: gõ dd/mm/yyyy + nút lịch */
+  .date-field { position: relative; display: flex; align-items: stretch; }
+  .date-field .date-text { flex: 1; width: 100%; padding-right: 36px; }
+  .date-btn {
+    position: absolute; right: 0; top: 0; height: 100%; width: 36px;
+    display: flex; align-items: center; justify-content: center; font-size: 16px;
+    cursor: pointer; color: var(--primary); border-left: 1px solid var(--border); overflow: hidden;
+  }
+  .date-btn:hover { background: var(--primary-light); }
+  .date-native { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+
   .toolbar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
   .toolbar .input { flex: 0 0 auto; }
   #listKeyword { flex: 1 1 240px; }
