@@ -180,6 +180,18 @@ function bindActions() {
   $('#btnSearch').addEventListener('click', function () { doSearch(1); });
   $('#btnSearchClear').addEventListener('click', clearSearch);
   $('#btnExport').addEventListener('click', doExport);
+  var bcm = $('#btnSearchClearM'); if (bcm) bcm.addEventListener('click', clearSearch);
+  var bem = $('#btnExportM'); if (bem) bem.addEventListener('click', doExport);
+  var btf = $('#btnToggleFilters');
+  if (btf) btf.addEventListener('click', function () {
+    var adv = $('#advFilters');
+    var collapsed = adv.classList.toggle('collapsed');
+    btf.textContent = collapsed ? 'Bộ lọc ▾' : 'Bộ lọc ▴';
+  });
+  // Trên điện thoại: thu gọn bộ lọc nâng cao để ưu tiên ô tìm kiếm + kết quả.
+  if (window.innerWidth <= 720) {
+    var adv0 = $('#advFilters'); if (adv0) adv0.classList.add('collapsed');
+  }
   $('#sKeyword').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
   $('#sIssuer').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
   $('#sNumber').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
@@ -608,7 +620,15 @@ function openDetail(fileId) {
           '</div>' +
         '</div>' +
       '</div>' +
-      '<div class="sys-info">' +
+      '<div class="form-row" style="margin-top:12px">' +
+        '<a class="btn btn-primary" href="' + esc(d.fileUrl) + '" target="_blank">Mở trên Drive</a>' +
+        (can('edit') ? '<button class="btn" id="btnEditDoc">✎ Sửa thông tin</button>' : '') +
+        (can('scan') ? '<button class="btn" id="btnReOcr">OCR lại</button>' : '') +
+        (can('delete') ? '<button class="btn btn-danger" id="btnDeleteDoc">🗑 Xoá văn bản</button>' : '') +
+      '</div>' +
+      previewBlock_(d) +
+      '<details class="detail-more" id="detailMore" open><summary>Thông tin chi tiết</summary>' +
+      '<div class="sys-info" style="margin-top:10px">' +
         row('Loại VB', esc(d.docType) + ' (' + esc(d.docTypeCode) + ')') +
         row('Số/Ký hiệu', esc(d.docNumber || '—')) +
         row('Đơn vị ban hành', esc(d.issuer || '—')) +
@@ -621,18 +641,13 @@ function openDetail(fileId) {
         row('Đường dẫn', esc(d.folderPath || '/')) +
         row('Trạng thái OCR', ocrLabel(d.ocrStatus) + (d.ocrProgress ? ' (' + esc(d.ocrProgress) + ' trang)' : '')) +
         row('Quét lúc', fmtDateTime(d.scannedAt)) +
-      '</div>' +
-      '<div class="form-row" style="margin-top:14px">' +
-        '<a class="btn btn-primary" href="' + esc(d.fileUrl) + '" target="_blank">Mở trên Drive</a>' +
-        (can('edit') ? '<button class="btn" id="btnEditDoc">✎ Sửa thông tin</button>' : '') +
-        (can('scan') ? '<button class="btn" id="btnReOcr">OCR lại</button>' : '') +
-        (can('delete') ? '<button class="btn btn-danger" id="btnDeleteDoc">🗑 Xoá văn bản</button>' : '') +
-      '</div>' +
-      previewBlock_(d) +
+      '</div></details>' +
       '<h3 style="margin-top:16px">Nội dung trích xuất' + (d.ocrProgress ? ' <span class="muted" style="font-weight:normal">(đã OCR ' + esc(d.ocrProgress) + ' trang)</span>' : '') + '</h3>' +
       '<div class="detail-content">' + (d.content ? esc(d.content) : '<i>Chưa có nội dung OCR. Xem bản gốc phía trên; nội dung sẽ có sau khi hàng đợi OCR xử lý, hoặc bấm "OCR lại" / "Sửa thông tin".</i>') + '</div>';
     $('#modalContent').innerHTML = html;
     setModalWide_(false);
+    // Trên điện thoại: thu gọn "Thông tin chi tiết" để ưu tiên đọc bản gốc.
+    if (window.innerWidth <= 720) { var dm = $('#detailMore'); if (dm) dm.removeAttribute('open'); }
     $('#modal').classList.remove('hidden');
     var btn = $('#btnReOcr');
     if (btn) btn.addEventListener('click', function () { doReOcr(d.fileId); });

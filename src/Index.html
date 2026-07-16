@@ -123,9 +123,11 @@
           <div class="form-row">
             <input type="text" id="sKeyword" class="input grow" placeholder="Nhập từ khoá (tên, số hiệu, trích yếu, nội dung, đơn vị...)">
             <button class="btn btn-primary" id="btnSearch">Tìm kiếm</button>
-            <button class="btn" id="btnSearchClear">Xoá lọc</button>
-            <button class="btn" id="btnExport" title="Xuất danh mục theo bộ lọc ra Excel/CSV">⭳ Xuất Excel</button>
+            <button class="btn only-mobile" id="btnToggleFilters">Bộ lọc ▾</button>
+            <button class="btn hide-mobile" id="btnSearchClear">Xoá lọc</button>
+            <button class="btn hide-mobile" id="btnExport" title="Xuất danh mục theo bộ lọc ra Excel/CSV">⭳ Xuất Excel</button>
           </div>
+          <div id="advFilters">
           <div class="form-row">
             <label>Loại văn bản
               <select id="sType" class="input"></select>
@@ -171,6 +173,11 @@
             </label>
           </div>
           <datalist id="issuerListSearch"></datalist>
+          </div><!-- /advFilters -->
+          <div class="form-row only-mobile" style="margin-top:6px">
+            <button class="btn" id="btnSearchClearM">Xoá lọc</button>
+            <button class="btn" id="btnExportM">⭳ Xuất Excel</button>
+          </div>
           <div id="searchSummary" class="muted"></div>
         </div>
         <div id="searchResults" class="results"></div>
