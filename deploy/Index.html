@@ -6,8 +6,8 @@
   <?!= include('Stylesheet'); ?>
 </head>
 <body>
-  <!-- Màn hình đăng nhập -->
-  <div id="loginScreen" class="login-screen">
+  <!-- Màn hình đăng nhập (lớp phủ, ẩn mặc định) -->
+  <div id="loginScreen" class="login-screen hidden">
     <div class="login-box">
       <div class="login-logo">
         <? if (typeof logoUri !== 'undefined' && logoUri) { ?>
@@ -36,6 +36,7 @@
       </label>
       <div id="loginError" class="login-error"></div>
       <button class="btn btn-primary login-btn" id="btnLogin">Đăng nhập</button>
+      <button class="btn login-guest" id="btnGuest">Tiếp tục xem (khách)</button>
       <p class="login-dev">Developed by <b>vupq@epu.edu.vn</b></p>
     </div>
   </div>
@@ -270,7 +271,7 @@
           </div>
           <div id="logoCheck" class="muted"></div>
         </div>
-        <div class="card">
+        <div class="card" id="cardPassword">
           <h3>Đổi mật khẩu</h3>
           <p class="muted">Đổi mật khẩu cho tài khoản đang đăng nhập.</p>
           <div class="form-row">

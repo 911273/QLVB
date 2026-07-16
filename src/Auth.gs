@@ -116,6 +116,11 @@ function publicAccount_(acc) {
   return { email: acc.email, name: acc.name, role: acc.role, active: acc.active, perms: acc.perms };
 }
 
+// Tài khoản KHÁCH (chưa đăng nhập): quyền chỉ xem, giống tài khoản Xem.
+function guestAccount_() {
+  return { email: '', name: 'Khách', role: 'guest', active: true, perms: rolePerms_('viewer') };
+}
+
 function countActiveAdmins_() {
   var sh = getAccountsSheet_();
   var lastRow = sh.getLastRow();

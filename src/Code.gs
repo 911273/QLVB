@@ -126,10 +126,17 @@ function apiDispatch(token, method, payload) {
     return r;
   }
 
-  var acc = authVerify_(token); // ném lỗi AUTH nếu token sai/hết hạn
   if (!METHOD_PERM.hasOwnProperty(method)) throw new Error('Chức năng không hợp lệ.');
   var need = METHOD_PERM[method];
-  if (need && need !== 'PUBLIC' && !acc.perms[need]) {
+
+  // Chưa đăng nhập -> dùng tài khoản KHÁCH (chỉ xem). Chức năng cần quyền cao hơn phải đăng nhập.
+  var acc = null;
+  try { acc = authVerify_(token); } catch (e) { acc = null; }
+  if (!acc) {
+    var guestOk = (need === null || need === 'view') && method !== 'changePassword';
+    if (!guestOk) throw new Error('AUTH: Vui lòng đăng nhập để sử dụng chức năng này.');
+    acc = guestAccount_();
+  } else if (need && need !== 'PUBLIC' && !acc.perms[need]) {
     throw new Error('Bạn không có quyền thực hiện chức năng này.');
   }
 

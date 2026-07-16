@@ -9,8 +9,8 @@ function call(method, payload) {
     google.script.run
       .withSuccessHandler(resolve)
       .withFailureHandler(function (err) {
-        // Token hỏng/hết hạn -> quay lại màn hình đăng nhập.
-        if (err && /^AUTH:/.test(err.message || '')) { doLogout(true); }
+        // Cần đăng nhập (khách bấm chức năng cần quyền, hoặc token hết hạn).
+        if (err && /^AUTH:/.test(err.message || '')) { onAuthRequired(); }
         reject(err);
       })
       .apiDispatch(TOKEN, method, payload || {});
@@ -114,23 +114,34 @@ document.addEventListener('DOMContentLoaded', function () {
   bindActions();
   bindLogin();
   initDateFields(document);
-  if (TOKEN) { loadStatus(); }
-  else { showLogin(); }
+  loadStatus(); // Mặc định vào với tư cách KHÁCH (xem); nếu có token thì theo tài khoản.
 });
 
 /* ============ Đăng nhập / đăng xuất ============ */
-function showLogin() {
+function showApp() { $('#app').classList.remove('hidden'); }
+function showLoginOverlay() {
+  $('#loginError').textContent = '';
   $('#loginScreen').classList.remove('hidden');
-  $('#app').classList.add('hidden');
+  setTimeout(function () { var e = $('#loginEmail'); if (e) e.focus(); }, 60);
 }
-function showApp() {
-  $('#loginScreen').classList.add('hidden');
-  $('#app').classList.remove('hidden');
+function hideLoginOverlay() { $('#loginScreen').classList.add('hidden'); }
+
+// Khi máy chủ yêu cầu đăng nhập (khách bấm chức năng cần quyền, hoặc token hết hạn).
+function onAuthRequired() {
+  if (TOKEN) {
+    TOKEN = '';
+    try { localStorage.removeItem('qlvb_token'); } catch (e) {}
+    STATE.me = null; STATE.searched = false;
+    loadStatus();
+  }
+  showLoginOverlay();
 }
+
 function bindLogin() {
   $('#btnLogin').addEventListener('click', doLogin);
   $('#loginPassword').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
   $('#loginEmail').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
+  var bg = $('#btnGuest'); if (bg) bg.addEventListener('click', hideLoginOverlay);
 }
 function doLogin() {
   var email = $('#loginEmail').value.trim();
@@ -144,9 +155,10 @@ function doLogin() {
     STATE.me = r.account;
     $('#loginPassword').value = '';
     showLoading(false);
-    showApp();
+    hideLoginOverlay();
     STATE.searched = false;
     loadStatus();
+    toast('Xin chào ' + (r.account.name || r.account.email) + '!', 'ok');
   }).catch(function (err) {
     showLoading(false);
     $('#loginError').textContent = (err && err.message) || 'Đăng nhập thất bại.';
@@ -155,8 +167,8 @@ function doLogin() {
 function doLogout(silent) {
   TOKEN = '';
   try { localStorage.removeItem('qlvb_token'); } catch (e) {}
-  STATE.me = null; STATE.status = null; STATE.searched = false;
-  showLogin();
+  STATE.me = null; STATE.searched = false;
+  loadStatus(); // Quay lại chế độ khách (xem)
   if (!silent) toast('Đã đăng xuất.', 'ok');
 }
 
@@ -272,12 +284,19 @@ function showWorkflow() { return !(STATE.me && STATE.me.role === 'free'); }
 
 function renderUserBox() {
   var me = STATE.me || {};
-  var roleLabel = roleLabel_(me.role);
-  $('#userBox').innerHTML =
-    '<span>' + esc(me.name || me.email || '') + ' <span class="tag">' + roleLabel + '</span></span> ' +
-    '<button class="btn btn-logout" id="btnLogout">Đăng xuất</button>';
-  var b = $('#btnLogout');
-  if (b) b.addEventListener('click', function () { doLogout(false); });
+  if (me.role && me.role !== 'guest') {
+    $('#userBox').innerHTML =
+      '<span>' + esc(me.name || me.email || '') + ' <span class="tag">' + roleLabel_(me.role) + '</span></span> ' +
+      '<button class="btn btn-logout" id="btnLogout">Đăng xuất</button>';
+    var b = $('#btnLogout');
+    if (b) b.addEventListener('click', function () { doLogout(false); });
+  } else {
+    $('#userBox').innerHTML =
+      '<span class="guest-label">Khách</span>' +
+      '<button class="btn btn-login" id="btnShowLogin">Đăng nhập</button>';
+    var bs = $('#btnShowLogin');
+    if (bs) bs.addEventListener('click', showLoginOverlay);
+  }
 }
 
 // Ẩn/hiện tab & nút theo quyền của tài khoản đang đăng nhập.
@@ -294,6 +313,9 @@ function applyAcl() {
   // Tài khoản free: ẩn ô lọc trạng thái & độ mật.
   toggleEl('#fStatus', showWorkflow());
   toggleEl('#fSecurity', showWorkflow());
+  // Khách chưa đăng nhập: ẩn thẻ đổi mật khẩu.
+  var loggedIn = !!(STATE.me && STATE.me.role && STATE.me.role !== 'guest');
+  toggleEl('#cardPassword', loggedIn);
 }
 function setTabVisible(name, on) {
   var tab = document.querySelector('.tab[data-tab="' + name + '"]');
@@ -1278,7 +1300,7 @@ function renderAccounts() {
   }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
 }
 function roleLabel_(r) {
-  return { admin: 'Quản trị viên', editor: 'Biên tập', viewer: 'Xem', free: 'Miễn phí' }[r] || 'Xem';
+  return { admin: 'Quản trị viên', editor: 'Biên tập', viewer: 'Xem', free: 'Miễn phí', guest: 'Khách' }[r] || 'Xem';
 }
 
 function openAccountEditor(acc) {
