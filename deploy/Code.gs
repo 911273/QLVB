@@ -1,6 +1,6 @@
 /*************************************************************************
  * QLVB-EPU - FILE MÃ NGUỒN GỘP
- * Gồm: Config Storage Classifier Issuer Vision Ocr OcrQueue Scanner Search Duplicate Trash Audit Export Upload Auth Code
+ * Gồm: Config Storage Classifier Issuer Keywords Vision Ocr OcrQueue Scanner Search Duplicate Trash Audit Export Upload Auth Code
  *************************************************************************/
 
 /* ===================== Config.gs ===================== */
@@ -265,7 +265,8 @@ var COLS = {
   STATUS: 17,        // Trạng thái xử lý
   SECURITY: 18,      // Độ mật
   URGENCY: 19,       // Độ khẩn
-  EDITED: 20         // Đã sửa thông tin bằng tay (bảo vệ metadata, nhưng vẫn OCR nội dung)
+  EDITED: 20,        // Đã sửa thông tin bằng tay (bảo vệ metadata, nhưng vẫn OCR nội dung)
+  KEYWORDS: 21       // Từ khóa tự trích (phục vụ tìm tài liệu liên quan)
 };
 
 var DB_HEADERS = [
@@ -273,7 +274,7 @@ var DB_HEADERS = [
   'Ngày ban hành', 'Trích yếu', 'Nội dung', 'Đường dẫn', 'MimeType',
   'Link Drive', 'Sửa lần cuối', 'Quét lúc', 'OCR',
   'Đơn vị ban hành', 'Cấp ban hành', 'OCR tiến độ',
-  'Trạng thái', 'Độ mật', 'Độ khẩn', 'Đã sửa'
+  'Trạng thái', 'Độ mật', 'Độ khẩn', 'Đã sửa', 'Từ khóa'
 ];
 
 /**
@@ -335,6 +336,7 @@ function getOrCreateDatabase() {
   ensureSheets_(ss);
   migrateIssuedDates_(ss); // chuyển ngày cũ (dạng chữ) sang ngày thật để hiển thị dd/mm/yyyy
   migrateManualStatus_(ss); // dữ liệu cũ trạng thái 'manual' -> cờ đã sửa
+  migrateKeywords_(ss);     // tính từ khóa cho văn bản cũ đã có nội dung (1 lần)
   _dbCache = ss;
   return ss;
 }
@@ -439,6 +441,31 @@ function migrateManualStatus_(ss) {
   } catch (e) { /* không để migration làm hỏng luồng chính */ }
 }
 
+// Tính từ khóa cho các văn bản cũ đã có nội dung nhưng chưa có từ khóa (chạy 1 lần).
+function migrateKeywords_(ss) {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('KEYWORDS_MIGRATED_V1')) return;
+  try {
+    var docs = ss.getSheetByName(DB_SHEET_DOCS);
+    var lastRow = docs.getLastRow();
+    if (lastRow >= 2 && docs.getLastColumn() >= COLS.KEYWORDS + 1) {
+      var n = lastRow - 1;
+      var titles = docs.getRange(2, COLS.TITLE + 1, n, 1).getValues();
+      var contents = docs.getRange(2, COLS.CONTENT + 1, n, 1).getValues();
+      var kws = docs.getRange(2, COLS.KEYWORDS + 1, n, 1).getValues();
+      var changed = false;
+      for (var i = 0; i < n; i++) {
+        if (!String(kws[i][0]).trim()) {
+          var t = String(titles[i][0] || ''), c = String(contents[i][0] || '');
+          if ((t + c).trim()) { kws[i][0] = extractKeywords_(t + ' ' + c, 12).join(', '); changed = true; }
+        }
+      }
+      if (changed) docs.getRange(2, COLS.KEYWORDS + 1, n, 1).setValues(kws);
+    }
+    props.setProperty('KEYWORDS_MIGRATED_V1', '1');
+  } catch (e) { /* không để migration làm hỏng luồng chính */ }
+}
+
 function getDocsSheet_() {
   return getOrCreateDatabase().getSheetByName(DB_SHEET_DOCS);
 }
@@ -509,7 +536,8 @@ function rowToObj_(r) {
     status: cell_(r[COLS.STATUS]),
     security: cell_(r[COLS.SECURITY]),
     urgency: cell_(r[COLS.URGENCY]),
-    edited: String(r[COLS.EDITED]).toUpperCase() === 'TRUE'
+    edited: String(r[COLS.EDITED]).toUpperCase() === 'TRUE',
+    keywords: cell_(r[COLS.KEYWORDS])
   };
 }
 
@@ -572,6 +600,7 @@ function docToRow_(d) {
   row[COLS.SECURITY] = d.security || '';
   row[COLS.URGENCY] = d.urgency || '';
   row[COLS.EDITED] = d.edited ? 'TRUE' : '';
+  row[COLS.KEYWORDS] = d.keywords || '';
   return row;
 }
 
@@ -630,6 +659,9 @@ function updateDocManual(p) {
   if (p.issuedDate != null) cur.issuedDate = normalizeDateInput_(p.issuedDate);
   if (p.title != null) cur.title = String(p.title);
   if (p.content != null) cur.content = String(p.content).substring(0, 45000);
+  if (p.content != null || p.title != null) {
+    cur.keywords = extractKeywords_((cur.title || '') + ' ' + (cur.content || ''), 12).join(', ');
+  }
   if (p.issuer != null) cur.issuer = String(p.issuer).trim();
   if (p.issuerLevel != null) cur.issuerLevel = String(p.issuerLevel).trim();
   if (p.status != null) cur.status = String(p.status).trim();
@@ -905,6 +937,157 @@ function detectIssuer_(fileName, content) {
   }
   if (best) return { name: best.name, level: best.level };
   return { name: '', level: '' };
+}
+
+
+/* ===================== Keywords.gs ===================== */
+/**
+ * Keywords.gs
+ * Tự động trích TỪ KHÓA của văn bản (từ tiêu đề + nội dung) và tìm TÀI LIỆU LIÊN QUAN.
+ */
+
+// Từ dừng tiếng Việt (đã bỏ dấu, chữ thường) - loại khỏi từ khóa.
+var VI_STOPWORDS = {
+  'cua': 1, 'va': 1, 'cac': 1, 'cho': 1, 'duoc': 1, 'trong': 1, 'la': 1, 'co': 1, 'mot': 1,
+  'nhung': 1, 'de': 1, 'voi': 1, 'theo': 1, 'khi': 1, 'nay': 1, 'da': 1, 'tai': 1, 've': 1,
+  'tu': 1, 'den': 1, 'cung': 1, 'nhu': 1, 'sau': 1, 'truoc': 1, 'do': 1, 'boi': 1, 'hoac': 1,
+  'neu': 1, 'thi': 1, 'ma': 1, 'ra': 1, 'vao': 1, 'len': 1, 'xuong': 1, 'hon': 1, 'rat': 1,
+  'se': 1, 'dang': 1, 'bi': 1, 'phai': 1, 'con': 1, 'nen': 1, 'tren': 1, 'duoi': 1, 'giua': 1,
+  'ngoai': 1, 'cai': 1, 'nao': 1, 'gi': 1, 'ai': 1, 'dau': 1, 'sao': 1, 'the': 1, 'vi': 1,
+  'nham': 1, 'qua': 1, 'lai': 1, 'nua': 1, 'chi': 1, 'chua': 1, 'hay': 1, 'tuy': 1, 'tuc': 1,
+  'so': 1, 'ngay': 1, 'thang': 1, 'nam': 1, 'viec': 1
+};
+
+function isStopword_(nw) { return !!VI_STOPWORDS[nw]; }
+
+/**
+ * Trích danh sách từ khóa (ưu tiên cụm 2 từ có ý nghĩa) từ text. Trả mảng chuỗi (giữ dấu).
+ */
+function extractKeywords_(text, maxN) {
+  maxN = maxN || 12;
+  if (!text) return [];
+  var raw = String(text).substring(0, 8000);
+  // Tách token: giữ chữ cái (kể cả tiếng Việt) và số, phần khác thành khoảng trắng.
+  var tokensRaw = raw.replace(/[^0-9A-Za-zÀ-ỹ\s]/g, ' ').split(/\s+/).filter(Boolean);
+  var norm = tokensRaw.map(function (w) { return normalizeVi_(w); });
+
+  var uni = {}, uniDisp = {};
+  var bi = {}, biDisp = {};
+  for (var i = 0; i < tokensRaw.length; i++) {
+    var nw = norm[i];
+    if (nw.length >= 3 && !isStopword_(nw) && !/^\d+$/.test(nw)) {
+      uni[nw] = (uni[nw] || 0) + 1;
+      if (!uniDisp[nw]) uniDisp[nw] = tokensRaw[i].toLowerCase();
+    }
+    // cụm 2 từ (bigram) khi cả 2 từ đều "có nghĩa"
+    if (i + 1 < tokensRaw.length) {
+      var n1 = norm[i], n2 = norm[i + 1];
+      if (n1.length >= 2 && n2.length >= 2 && !isStopword_(n1) && !isStopword_(n2) &&
+          !/^\d+$/.test(n1) && !/^\d+$/.test(n2)) {
+        var key = n1 + ' ' + n2;
+        bi[key] = (bi[key] || 0) + 1;
+        if (!biDisp[key]) biDisp[key] = (tokensRaw[i] + ' ' + tokensRaw[i + 1]).toLowerCase();
+      }
+    }
+  }
+
+  // Chọn cụm 2 từ trước (ưu tiên), rồi bổ sung từ đơn KHÔNG nằm trong cụm đã chọn.
+  var bigrams = Object.keys(bi).filter(function (k) { return bi[k] >= 2; })
+    .sort(function (a, b) { return bi[b] - bi[a]; });
+  var out = [], usedTok = {};
+  for (var p = 0; p < bigrams.length && out.length < maxN; p++) {
+    var k = bigrams[p];
+    out.push(biDisp[k]);
+    k.split(' ').forEach(function (w) { usedTok[w] = 1; }); // đánh dấu các từ thành phần
+  }
+  var unigrams = Object.keys(uni).filter(function (k) { return uni[k] >= 3 && !usedTok[k]; })
+    .sort(function (a, b) { return uni[b] - uni[a]; });
+  for (var q = 0; q < unigrams.length && out.length < maxN; q++) {
+    out.push(uniDisp[unigrams[q]]);
+  }
+  return out;
+}
+
+// Tập từ khóa (đã chuẩn hoá) của 1 văn bản.
+function keywordSet_(keywordsStr) {
+  var set = {};
+  String(keywordsStr || '').split(',').forEach(function (k) {
+    var n = normalizeVi_(k).trim();
+    if (n) set[n] = 1;
+  });
+  return set;
+}
+
+/**
+ * Đọc "nhẹ" các cột cần cho tính liên quan (không đọc nội dung).
+ */
+function readRelatedDocs_() {
+  var sheet = getDocsSheet_();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var n = lastRow - 1;
+  var a = sheet.getRange(2, 1, n, COLS.TITLE + 1).getValues();               // cột 1..7 (không có nội dung)
+  var b = sheet.getRange(2, COLS.ISSUER + 1, n, COLS.KEYWORDS - COLS.ISSUER + 1).getValues(); // ISSUER..KEYWORDS
+  var kOff = COLS.KEYWORDS - COLS.ISSUER;
+  var out = [];
+  for (var i = 0; i < n; i++) {
+    out.push({
+      fileId: cell_(a[i][COLS.FILE_ID]),
+      fileName: cell_(a[i][COLS.FILE_NAME]),
+      docType: cell_(a[i][COLS.DOC_TYPE]),
+      docTypeCode: cell_(a[i][COLS.DOC_TYPE_CODE]),
+      docNumber: cell_(a[i][COLS.DOC_NUMBER]),
+      issuedDate: dateCell_(a[i][COLS.ISSUED_DATE]),
+      title: cell_(a[i][COLS.TITLE]),
+      issuer: cell_(b[i][0]),
+      issuerLevel: cell_(b[i][1]),
+      keywords: cell_(b[i][kOff])
+    });
+  }
+  return out;
+}
+
+/**
+ * Tìm tài liệu liên quan tới 1 văn bản: dựa trên từ khóa chung + cùng loại/đơn vị/thời gian.
+ */
+function getRelatedDocs_(fileId, limit) {
+  limit = limit || 8;
+  var docs = readRelatedDocs_();
+  var target = null;
+  for (var i = 0; i < docs.length; i++) { if (docs[i].fileId === fileId) { target = docs[i]; break; } }
+  if (!target) return [];
+
+  var tSet = keywordSet_(target.keywords);
+  var tTitle = normalizeVi_(target.title || '');
+  var tYear = (target.issuedDate || '').substring(0, 4);
+
+  var scored = [];
+  for (var j = 0; j < docs.length; j++) {
+    var d = docs[j];
+    if (d.fileId === fileId) continue;
+    var score = 0, shared = 0;
+    var dSet = keywordSet_(d.keywords);
+    Object.keys(dSet).forEach(function (k) {
+      if (tSet[k]) shared++;
+      // từ khóa của tài liệu này xuất hiện trong tiêu đề tài liệu đang xem
+      else if (k.length >= 4 && tTitle.indexOf(k) !== -1) score += 3;
+    });
+    score += shared * 10;
+    if (d.docTypeCode && d.docTypeCode === target.docTypeCode) score += 6;
+    if (d.issuer && d.issuer === target.issuer) score += 8;
+    else if (d.issuerLevel && d.issuerLevel === target.issuerLevel) score += 2;
+    if (tYear && (d.issuedDate || '').substring(0, 4) === tYear) score += 2;
+
+    if (score > 0) {
+      scored.push({
+        fileId: d.fileId, title: d.title, fileName: d.fileName, docType: d.docType,
+        docNumber: d.docNumber, issuedDate: d.issuedDate, issuer: d.issuer,
+        shared: shared, score: score
+      });
+    }
+  }
+  scored.sort(function (a, b) { return b.score - a.score; });
+  return scored.slice(0, limit);
 }
 
 
@@ -1302,9 +1485,11 @@ function ocrOneStep_(d, budgetPages) {
  * Sau khi OCR xong: suy lại loại/số hiệu/ngày/đơn vị/trích yếu từ nội dung (nếu còn thiếu).
  */
 function finalizeDocAfterOcr_(d) {
+  var content = d.content || '';
+  // Luôn cập nhật từ khóa theo nội dung mới (kể cả bản đã sửa tay).
+  d.keywords = extractKeywords_((d.title || '') + ' ' + content, 12).join(', ');
   // Bản đã sửa tay: chỉ giữ nội dung vừa OCR, KHÔNG suy lại metadata (giữ chỉnh sửa của người dùng).
   if (d.edited) return;
-  var content = d.content || '';
   d.title = extractTitle(d.fileName, content) || d.title;
   if (!d.docNumber) d.docNumber = extractDocNumber(d.fileName, content);
   if (!d.docTypeCode || d.docTypeCode === 'KHAC') {
@@ -1566,7 +1751,8 @@ function processFile_(f, existing) {
     ocrProgress: ocrProgress,
     status: 'Mới',
     security: 'Thường',
-    urgency: 'Thường'
+    urgency: 'Thường',
+    keywords: extractKeywords_((title || '') + ' ' + content, 12).join(', ')
   };
   var op = upsertDoc_(doc, existing);
   doc._op = op;
@@ -2611,7 +2797,7 @@ var METHOD_PERM = {
   login: 'PUBLIC',
   getStatus: null, changePassword: null, logout: null,
   search: 'view', getDetail: 'view', getStats: 'view', getUploadInfo: 'view', findDuplicates: 'view',
-  exportCsv: 'view',
+  exportCsv: 'view', getRelated: 'view',
   updateDoc: 'edit', reOcr: 'edit', deleteDoc: 'delete',
   listTrash: 'delete', restoreDoc: 'delete', purgeDoc: 'delete', emptyTrash: 'delete',
   scan: 'scan', ocrQueueRun: 'scan', setOcrAuto: 'scan', setOcrLimit: 'scan', setAutoScan: 'scan',
@@ -2667,6 +2853,7 @@ function routeMethod_(method, payload, acc) {
     case 'logout':       return { ok: true };
     case 'search':       return searchDocs(payload);
     case 'getDetail':    return getDocDetail(payload.fileId);
+    case 'getRelated':   return getRelatedDocs_(payload.fileId, payload.limit);
     case 'getStats':     return apiGetStats();
     case 'findDuplicates': return findDuplicates();
     case 'getUploadInfo': return apiGetUploadInfo();

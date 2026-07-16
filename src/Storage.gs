@@ -25,7 +25,8 @@ var COLS = {
   STATUS: 17,        // Trạng thái xử lý
   SECURITY: 18,      // Độ mật
   URGENCY: 19,       // Độ khẩn
-  EDITED: 20         // Đã sửa thông tin bằng tay (bảo vệ metadata, nhưng vẫn OCR nội dung)
+  EDITED: 20,        // Đã sửa thông tin bằng tay (bảo vệ metadata, nhưng vẫn OCR nội dung)
+  KEYWORDS: 21       // Từ khóa tự trích (phục vụ tìm tài liệu liên quan)
 };
 
 var DB_HEADERS = [
@@ -33,7 +34,7 @@ var DB_HEADERS = [
   'Ngày ban hành', 'Trích yếu', 'Nội dung', 'Đường dẫn', 'MimeType',
   'Link Drive', 'Sửa lần cuối', 'Quét lúc', 'OCR',
   'Đơn vị ban hành', 'Cấp ban hành', 'OCR tiến độ',
-  'Trạng thái', 'Độ mật', 'Độ khẩn', 'Đã sửa'
+  'Trạng thái', 'Độ mật', 'Độ khẩn', 'Đã sửa', 'Từ khóa'
 ];
 
 /**
@@ -95,6 +96,7 @@ function getOrCreateDatabase() {
   ensureSheets_(ss);
   migrateIssuedDates_(ss); // chuyển ngày cũ (dạng chữ) sang ngày thật để hiển thị dd/mm/yyyy
   migrateManualStatus_(ss); // dữ liệu cũ trạng thái 'manual' -> cờ đã sửa
+  migrateKeywords_(ss);     // tính từ khóa cho văn bản cũ đã có nội dung (1 lần)
   _dbCache = ss;
   return ss;
 }
@@ -199,6 +201,31 @@ function migrateManualStatus_(ss) {
   } catch (e) { /* không để migration làm hỏng luồng chính */ }
 }
 
+// Tính từ khóa cho các văn bản cũ đã có nội dung nhưng chưa có từ khóa (chạy 1 lần).
+function migrateKeywords_(ss) {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('KEYWORDS_MIGRATED_V1')) return;
+  try {
+    var docs = ss.getSheetByName(DB_SHEET_DOCS);
+    var lastRow = docs.getLastRow();
+    if (lastRow >= 2 && docs.getLastColumn() >= COLS.KEYWORDS + 1) {
+      var n = lastRow - 1;
+      var titles = docs.getRange(2, COLS.TITLE + 1, n, 1).getValues();
+      var contents = docs.getRange(2, COLS.CONTENT + 1, n, 1).getValues();
+      var kws = docs.getRange(2, COLS.KEYWORDS + 1, n, 1).getValues();
+      var changed = false;
+      for (var i = 0; i < n; i++) {
+        if (!String(kws[i][0]).trim()) {
+          var t = String(titles[i][0] || ''), c = String(contents[i][0] || '');
+          if ((t + c).trim()) { kws[i][0] = extractKeywords_(t + ' ' + c, 12).join(', '); changed = true; }
+        }
+      }
+      if (changed) docs.getRange(2, COLS.KEYWORDS + 1, n, 1).setValues(kws);
+    }
+    props.setProperty('KEYWORDS_MIGRATED_V1', '1');
+  } catch (e) { /* không để migration làm hỏng luồng chính */ }
+}
+
 function getDocsSheet_() {
   return getOrCreateDatabase().getSheetByName(DB_SHEET_DOCS);
 }
@@ -269,7 +296,8 @@ function rowToObj_(r) {
     status: cell_(r[COLS.STATUS]),
     security: cell_(r[COLS.SECURITY]),
     urgency: cell_(r[COLS.URGENCY]),
-    edited: String(r[COLS.EDITED]).toUpperCase() === 'TRUE'
+    edited: String(r[COLS.EDITED]).toUpperCase() === 'TRUE',
+    keywords: cell_(r[COLS.KEYWORDS])
   };
 }
 
@@ -332,6 +360,7 @@ function docToRow_(d) {
   row[COLS.SECURITY] = d.security || '';
   row[COLS.URGENCY] = d.urgency || '';
   row[COLS.EDITED] = d.edited ? 'TRUE' : '';
+  row[COLS.KEYWORDS] = d.keywords || '';
   return row;
 }
 
@@ -390,6 +419,9 @@ function updateDocManual(p) {
   if (p.issuedDate != null) cur.issuedDate = normalizeDateInput_(p.issuedDate);
   if (p.title != null) cur.title = String(p.title);
   if (p.content != null) cur.content = String(p.content).substring(0, 45000);
+  if (p.content != null || p.title != null) {
+    cur.keywords = extractKeywords_((cur.title || '') + ' ' + (cur.content || ''), 12).join(', ');
+  }
   if (p.issuer != null) cur.issuer = String(p.issuer).trim();
   if (p.issuerLevel != null) cur.issuerLevel = String(p.issuerLevel).trim();
   if (p.status != null) cur.status = String(p.status).trim();

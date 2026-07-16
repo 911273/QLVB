@@ -96,7 +96,7 @@ var METHOD_PERM = {
   login: 'PUBLIC',
   getStatus: null, changePassword: null, logout: null,
   search: 'view', getDetail: 'view', getStats: 'view', getUploadInfo: 'view', findDuplicates: 'view',
-  exportCsv: 'view',
+  exportCsv: 'view', getRelated: 'view',
   updateDoc: 'edit', reOcr: 'edit', deleteDoc: 'delete',
   listTrash: 'delete', restoreDoc: 'delete', purgeDoc: 'delete', emptyTrash: 'delete',
   scan: 'scan', ocrQueueRun: 'scan', setOcrAuto: 'scan', setOcrLimit: 'scan', setAutoScan: 'scan',
@@ -152,6 +152,7 @@ function routeMethod_(method, payload, acc) {
     case 'logout':       return { ok: true };
     case 'search':       return searchDocs(payload);
     case 'getDetail':    return getDocDetail(payload.fileId);
+    case 'getRelated':   return getRelatedDocs_(payload.fileId, payload.limit);
     case 'getStats':     return apiGetStats();
     case 'findDuplicates': return findDuplicates();
     case 'getUploadInfo': return apiGetUploadInfo();

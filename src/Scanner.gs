@@ -159,7 +159,8 @@ function processFile_(f, existing) {
     ocrProgress: ocrProgress,
     status: 'Mới',
     security: 'Thường',
-    urgency: 'Thường'
+    urgency: 'Thường',
+    keywords: extractKeywords_((title || '') + ' ' + content, 12).join(', ')
   };
   var op = upsertDoc_(doc, existing);
   doc._op = op;

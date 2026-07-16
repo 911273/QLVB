@@ -693,9 +693,14 @@ function openDetail(fileId) {
         row('Trạng thái OCR', (ocrLabel(d.ocrStatus) || '—') + (d.ocrProgress ? ' (' + esc(d.ocrProgress) + ' trang)' : '')) +
         row('Quét lúc', fmtDateTime(d.scannedAt)) +
       '</div></details>' +
+      (d.keywords ? '<h3 style="margin-top:16px">Từ khóa</h3><div class="detail-chips">' +
+        d.keywords.split(',').map(function (k) { k = k.trim(); return k ? '<span class="chip kw">' + esc(k) + '</span>' : ''; }).join('') + '</div>' : '') +
+      '<h3 style="margin-top:16px">Tài liệu liên quan</h3>' +
+      '<div id="relatedBox" class="related-box"><span class="muted">Đang tìm tài liệu liên quan...</span></div>' +
       '<h3 style="margin-top:16px">Nội dung trích xuất' + (d.ocrProgress ? ' <span class="muted" style="font-weight:normal">(đã OCR ' + esc(d.ocrProgress) + ' trang)</span>' : '') + '</h3>' +
       '<div class="detail-content">' + (d.content ? esc(d.content) : '<i>Chưa có nội dung OCR. Xem bản gốc phía trên; nội dung sẽ có sau khi hàng đợi OCR xử lý, hoặc bấm "OCR lại" / "Sửa thông tin".</i>') + '</div>';
     $('#modalContent').innerHTML = html;
+    loadRelated(d.fileId);
     setModalWide_(false);
     // Trên điện thoại: thu gọn "Thông tin chi tiết" để ưu tiên đọc bản gốc.
     if (window.innerWidth <= 720) { var dm = $('#detailMore'); if (dm) dm.removeAttribute('open'); }
@@ -707,6 +712,29 @@ function openDetail(fileId) {
     var btnD = $('#btnDeleteDoc');
     if (btnD) btnD.addEventListener('click', function () { deleteDocUi(d); });
   }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+function loadRelated(fileId) {
+  call('getRelated', { fileId: fileId, limit: 8 }).then(function (list) {
+    var box = $('#relatedBox');
+    if (!box) return;
+    if (!list || !list.length) { box.innerHTML = '<span class="muted">Không tìm thấy tài liệu liên quan.</span>'; return; }
+    box.innerHTML = list.map(function (d) {
+      return '<div class="related-item" data-rel="' + esc(d.fileId) + '">' +
+        '<div class="related-title">' + esc(d.title || d.fileName) + '</div>' +
+        '<div class="muted" style="font-size:12px">' +
+          '<b>' + esc(d.docType || '') + '</b>' +
+          (d.docNumber ? ' • Số: ' + esc(d.docNumber) : '') +
+          ' • ' + fmtDate(d.issuedDate) +
+          (d.shared ? ' • <span class="tag">' + d.shared + ' từ khóa chung</span>' : '') +
+        '</div></div>';
+    }).join('');
+    $all('[data-rel]', box).forEach(function (it) {
+      it.addEventListener('click', function () { openDetail(it.getAttribute('data-rel')); });
+    });
+  }).catch(function () {
+    var box = $('#relatedBox'); if (box) box.innerHTML = '<span class="muted">—</span>';
+  });
 }
 
 function deleteDocUi(d) {
