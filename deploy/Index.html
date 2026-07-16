@@ -121,7 +121,7 @@
       <section class="tab-panel active" id="tab-search">
         <div class="search-form card">
           <div class="form-row">
-            <input type="text" id="sKeyword" class="input grow" placeholder="Nhập từ khoá (tên, số hiệu, trích yếu, nội dung, đơn vị...)">
+            <input type="text" id="sKeyword" class="input grow" placeholder="Nhập từ khoá — đặt trong &quot;...&quot; để tìm đúng cụm từ">
             <button class="btn btn-primary" id="btnSearch">Tìm kiếm</button>
             <button class="btn only-mobile" id="btnToggleFilters">Bộ lọc ▾</button>
             <button class="btn hide-mobile" id="btnSearchClear">Xoá lọc</button>
@@ -163,6 +163,7 @@
             </label>
             <label>Sắp xếp
               <select id="sSort" class="input">
+                <option value="relevance|desc">Liên quan nhất</option>
                 <option value="issuedDate|desc">Ngày ban hành ↓ (mới nhất)</option>
                 <option value="issuedDate|asc">Ngày ban hành ↑ (cũ nhất)</option>
                 <option value="fileName|asc">Tên A→Z</option>

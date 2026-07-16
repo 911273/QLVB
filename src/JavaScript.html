@@ -482,7 +482,7 @@ function clearSearch() {
   if ($('#sLevel')) $('#sLevel').value = '';
   if ($('#sStatus')) $('#sStatus').value = '';
   if ($('#sSecurity')) $('#sSecurity').value = '';
-  if ($('#sSort')) $('#sSort').value = 'issuedDate|desc';
+  if ($('#sSort')) $('#sSort').value = 'relevance|desc';
   doSearch(1);
 }
 
@@ -506,7 +506,7 @@ function renderResults(sel, res, keyword) {
     return;
   }
   box.innerHTML = '';
-  var terms = (keyword || '').toLowerCase().split(/\s+/).filter(Boolean);
+  var terms = (keyword || '').replace(/"/g, ' ').toLowerCase().split(/\s+/).filter(Boolean);
   res.items.forEach(function (d) {
     var item = el('div', 'doc-item');
     var badge = el('div', 'doc-badge', esc(d.docTypeCode || '?'));
