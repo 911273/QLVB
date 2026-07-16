@@ -554,7 +554,7 @@ function renderResults(sel, res, keyword) {
         '<span>Ngày BH: <b>' + fmtDate(d.issuedDate) + '</b></span>' +
         (d.issuer ? '<span>ĐV: <b>' + esc(d.issuer) + '</b>' + (d.issuerLevel ? ' <span class="tag">' + esc(d.issuerLevel) + '</span>' : '') + '</span>' : (d.issuerLevel ? '<span class="tag">' + esc(d.issuerLevel) + '</span>' : '')) +
         '<span>' + esc(d.fileName) + '</span>' +
-        '<span class="tag ' + esc(d.ocrStatus) + '">' + ocrLabel(d.ocrStatus) + '</span>' +
+        (ocrLabel(d.ocrStatus) ? '<span class="tag ' + esc(d.ocrStatus) + '">' + ocrLabel(d.ocrStatus) + '</span>' : '') +
         (showWorkflow() && d.status ? '<span class="tag st-' + statusClass_(d.status) + '">' + esc(d.status) + '</span>' : '') +
         (showWorkflow() && d.security && d.security !== 'Thường' ? '<span class="tag sec">' + esc(d.security) + '</span>' : '') +
         (showWorkflow() && d.urgency && d.urgency !== 'Thường' ? '<span class="tag urg">' + esc(d.urgency) + '</span>' : '') +
@@ -577,7 +577,7 @@ function statusClass_(s) {
 function ocrLabel(s) {
   if (s === 'ok') return 'Đã trích xuất';
   if (s === 'ok-vision') return 'OCR nâng cao (Vision)';
-  if (s === 'manual') return 'Đã sửa tay';
+  if (s === 'manual') return ''; // không hiển thị nhãn "Đã sửa tay"
   if (s === 'pending') return 'Đang chờ OCR';
   if (s === 'partial') return 'Đang OCR dở';
   if (s === 'skip') return 'Không OCR';
@@ -679,7 +679,7 @@ function openDetail(fileId) {
         row('Ngày ban hành', fmtDate(d.issuedDate)) +
         row('Tên file', esc(d.fileName)) +
         row('Đường dẫn', esc(d.folderPath || '/')) +
-        row('Trạng thái OCR', ocrLabel(d.ocrStatus) + (d.ocrProgress ? ' (' + esc(d.ocrProgress) + ' trang)' : '')) +
+        row('Trạng thái OCR', (ocrLabel(d.ocrStatus) || '—') + (d.ocrProgress ? ' (' + esc(d.ocrProgress) + ' trang)' : '')) +
         row('Quét lúc', fmtDateTime(d.scannedAt)) +
       '</div></details>' +
       '<h3 style="margin-top:16px">Nội dung trích xuất' + (d.ocrProgress ? ' <span class="muted" style="font-weight:normal">(đã OCR ' + esc(d.ocrProgress) + ' trang)</span>' : '') + '</h3>' +
