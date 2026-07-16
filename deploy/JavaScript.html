@@ -563,8 +563,9 @@ function renderResults(sel, res, keyword) {
     var actions = el('div', 'doc-actions');
     var btnView = el('button', 'btn', 'Xem');
     btnView.addEventListener('click', function () { openDetail(d.fileId); });
-    var btnOpen = el('a', 'btn', 'Mở file');
-    btnOpen.href = d.fileUrl; btnOpen.target = '_blank';
+    var btnOpen = el('a', 'btn', 'Download');
+    btnOpen.href = 'https://drive.google.com/uc?export=download&id=' + encodeURIComponent(d.fileId);
+    btnOpen.target = '_blank';
     actions.appendChild(btnView);
     actions.appendChild(btnOpen);
     item.appendChild(badge); item.appendChild(main); item.appendChild(actions);
