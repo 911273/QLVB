@@ -104,7 +104,7 @@ function ocrOneStep_(d, budgetPages) {
 function finalizeDocAfterOcr_(d) {
   var content = d.content || '';
   // Luôn cập nhật từ khóa theo nội dung mới (kể cả bản đã sửa tay).
-  d.keywords = extractKeywords_((d.title || '') + ' ' + content, 12).join(', ');
+  d.keywords = computeKeywords_((d.title || '') + ' ' + content);
   // Bản đã sửa tay: chỉ giữ nội dung vừa OCR, KHÔNG suy lại metadata (giữ chỉnh sửa của người dùng).
   if (d.edited) return;
   d.title = extractTitle(d.fileName, content) || d.title;

@@ -201,10 +201,10 @@ function migrateManualStatus_(ss) {
   } catch (e) { /* không để migration làm hỏng luồng chính */ }
 }
 
-// Tính từ khóa cho các văn bản cũ đã có nội dung nhưng chưa có từ khóa (chạy 1 lần).
+// Tính LẠI hồ sơ từ khóa (term|tần suất) cho mọi văn bản đã có nội dung (chạy 1 lần).
 function migrateKeywords_(ss) {
   var props = PropertiesService.getScriptProperties();
-  if (props.getProperty('KEYWORDS_MIGRATED_V1')) return;
+  if (props.getProperty('KEYWORDS_MIGRATED_V2')) return;
   try {
     var docs = ss.getSheetByName(DB_SHEET_DOCS);
     var lastRow = docs.getLastRow();
@@ -215,14 +215,12 @@ function migrateKeywords_(ss) {
       var kws = docs.getRange(2, COLS.KEYWORDS + 1, n, 1).getValues();
       var changed = false;
       for (var i = 0; i < n; i++) {
-        if (!String(kws[i][0]).trim()) {
-          var t = String(titles[i][0] || ''), c = String(contents[i][0] || '');
-          if ((t + c).trim()) { kws[i][0] = extractKeywords_(t + ' ' + c, 12).join(', '); changed = true; }
-        }
+        var t = String(titles[i][0] || ''), c = String(contents[i][0] || '');
+        if ((t + c).trim()) { kws[i][0] = computeKeywords_(t + ' ' + c); changed = true; }
       }
       if (changed) docs.getRange(2, COLS.KEYWORDS + 1, n, 1).setValues(kws);
     }
-    props.setProperty('KEYWORDS_MIGRATED_V1', '1');
+    props.setProperty('KEYWORDS_MIGRATED_V2', '1');
   } catch (e) { /* không để migration làm hỏng luồng chính */ }
 }
 
@@ -420,7 +418,7 @@ function updateDocManual(p) {
   if (p.title != null) cur.title = String(p.title);
   if (p.content != null) cur.content = String(p.content).substring(0, 45000);
   if (p.content != null || p.title != null) {
-    cur.keywords = extractKeywords_((cur.title || '') + ' ' + (cur.content || ''), 12).join(', ');
+    cur.keywords = computeKeywords_((cur.title || '') + ' ' + (cur.content || ''));
   }
   if (p.issuer != null) cur.issuer = String(p.issuer).trim();
   if (p.issuerLevel != null) cur.issuerLevel = String(p.issuerLevel).trim();

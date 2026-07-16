@@ -160,7 +160,7 @@ function processFile_(f, existing) {
     status: 'Mới',
     security: 'Thường',
     urgency: 'Thường',
-    keywords: extractKeywords_((title || '') + ' ' + content, 12).join(', ')
+    keywords: computeKeywords_((title || '') + ' ' + content)
   };
   var op = upsertDoc_(doc, existing);
   doc._op = op;

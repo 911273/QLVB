@@ -694,7 +694,10 @@ function openDetail(fileId) {
         row('Quét lúc', fmtDateTime(d.scannedAt)) +
       '</div></details>' +
       (d.keywords ? '<h3 style="margin-top:16px">Từ khóa</h3><div class="detail-chips">' +
-        d.keywords.split(',').map(function (k) { k = k.trim(); return k ? '<span class="chip kw">' + esc(k) + '</span>' : ''; }).join('') + '</div>' : '') +
+        d.keywords.split(',').map(function (k) {
+          k = k.trim(); var p = k.lastIndexOf('|'); if (p !== -1) k = k.substring(0, p).trim();
+          return k ? '<span class="chip kw">' + esc(k) + '</span>' : '';
+        }).join('') + '</div>' : '') +
       '<h3 style="margin-top:16px">Tài liệu liên quan</h3>' +
       '<div id="relatedBox" class="related-box"><span class="muted">Đang tìm tài liệu liên quan...</span></div>' +
       '<h3 style="margin-top:16px">Nội dung trích xuất' + (d.ocrProgress ? ' <span class="muted" style="font-weight:normal">(đã OCR ' + esc(d.ocrProgress) + ' trang)</span>' : '') + '</h3>' +
@@ -726,7 +729,8 @@ function loadRelated(fileId) {
           '<b>' + esc(d.docType || '') + '</b>' +
           (d.docNumber ? ' • Số: ' + esc(d.docNumber) : '') +
           ' • ' + fmtDate(d.issuedDate) +
-          (d.shared ? ' • <span class="tag">' + d.shared + ' từ khóa chung</span>' : '') +
+          (d.similarity ? ' • <span class="tag ok">' + d.similarity + '% giống nội dung</span>' : '') +
+          (d.shared ? ' • ' + d.shared + ' từ khóa chung' : '') +
         '</div></div>';
     }).join('');
     $all('[data-rel]', box).forEach(function (it) {

@@ -441,10 +441,10 @@ function migrateManualStatus_(ss) {
   } catch (e) { /* không để migration làm hỏng luồng chính */ }
 }
 
-// Tính từ khóa cho các văn bản cũ đã có nội dung nhưng chưa có từ khóa (chạy 1 lần).
+// Tính LẠI hồ sơ từ khóa (term|tần suất) cho mọi văn bản đã có nội dung (chạy 1 lần).
 function migrateKeywords_(ss) {
   var props = PropertiesService.getScriptProperties();
-  if (props.getProperty('KEYWORDS_MIGRATED_V1')) return;
+  if (props.getProperty('KEYWORDS_MIGRATED_V2')) return;
   try {
     var docs = ss.getSheetByName(DB_SHEET_DOCS);
     var lastRow = docs.getLastRow();
@@ -455,14 +455,12 @@ function migrateKeywords_(ss) {
       var kws = docs.getRange(2, COLS.KEYWORDS + 1, n, 1).getValues();
       var changed = false;
       for (var i = 0; i < n; i++) {
-        if (!String(kws[i][0]).trim()) {
-          var t = String(titles[i][0] || ''), c = String(contents[i][0] || '');
-          if ((t + c).trim()) { kws[i][0] = extractKeywords_(t + ' ' + c, 12).join(', '); changed = true; }
-        }
+        var t = String(titles[i][0] || ''), c = String(contents[i][0] || '');
+        if ((t + c).trim()) { kws[i][0] = computeKeywords_(t + ' ' + c); changed = true; }
       }
       if (changed) docs.getRange(2, COLS.KEYWORDS + 1, n, 1).setValues(kws);
     }
-    props.setProperty('KEYWORDS_MIGRATED_V1', '1');
+    props.setProperty('KEYWORDS_MIGRATED_V2', '1');
   } catch (e) { /* không để migration làm hỏng luồng chính */ }
 }
 
@@ -660,7 +658,7 @@ function updateDocManual(p) {
   if (p.title != null) cur.title = String(p.title);
   if (p.content != null) cur.content = String(p.content).substring(0, 45000);
   if (p.content != null || p.title != null) {
-    cur.keywords = extractKeywords_((cur.title || '') + ' ' + (cur.content || ''), 12).join(', ');
+    cur.keywords = computeKeywords_((cur.title || '') + ' ' + (cur.content || ''));
   }
   if (p.issuer != null) cur.issuer = String(p.issuer).trim();
   if (p.issuerLevel != null) cur.issuerLevel = String(p.issuerLevel).trim();
@@ -943,10 +941,12 @@ function detectIssuer_(fileName, content) {
 /* ===================== Keywords.gs ===================== */
 /**
  * Keywords.gs
- * Tự động trích TỪ KHÓA của văn bản (từ tiêu đề + nội dung) và tìm TÀI LIỆU LIÊN QUAN.
+ * Phân tích nội dung: trích "hồ sơ từ khóa" (term + tần suất) cho mỗi văn bản, và
+ * tìm TÀI LIỆU LIÊN QUAN bằng TF-IDF + độ tương đồng cosine (ưu tiên từ khóa đặc trưng).
+ *
+ * Cột "Từ khóa" lưu dạng: "khoa học|8, công nghệ|5, quy chế|4, ..." (term|tần suất).
  */
 
-// Từ dừng tiếng Việt (đã bỏ dấu, chữ thường) - loại khỏi từ khóa.
 var VI_STOPWORDS = {
   'cua': 1, 'va': 1, 'cac': 1, 'cho': 1, 'duoc': 1, 'trong': 1, 'la': 1, 'co': 1, 'mot': 1,
   'nhung': 1, 'de': 1, 'voi': 1, 'theo': 1, 'khi': 1, 'nay': 1, 'da': 1, 'tai': 1, 've': 1,
@@ -957,29 +957,26 @@ var VI_STOPWORDS = {
   'nham': 1, 'qua': 1, 'lai': 1, 'nua': 1, 'chi': 1, 'chua': 1, 'hay': 1, 'tuy': 1, 'tuc': 1,
   'so': 1, 'ngay': 1, 'thang': 1, 'nam': 1, 'viec': 1
 };
-
 function isStopword_(nw) { return !!VI_STOPWORDS[nw]; }
 
 /**
- * Trích danh sách từ khóa (ưu tiên cụm 2 từ có ý nghĩa) từ text. Trả mảng chuỗi (giữ dấu).
+ * Trích hồ sơ term của 1 văn bản: mảng {t: hiển thị, n: chuẩn hoá, f: tần suất}.
+ * Ưu tiên cụm 2 từ có nghĩa, kèm từ đơn đặc trưng.
  */
-function extractKeywords_(text, maxN) {
-  maxN = maxN || 12;
+function extractTermProfile_(text, maxN) {
+  maxN = maxN || 25;
   if (!text) return [];
-  var raw = String(text).substring(0, 8000);
-  // Tách token: giữ chữ cái (kể cả tiếng Việt) và số, phần khác thành khoảng trắng.
+  var raw = String(text).substring(0, 12000);
   var tokensRaw = raw.replace(/[^0-9A-Za-zÀ-ỹ\s]/g, ' ').split(/\s+/).filter(Boolean);
   var norm = tokensRaw.map(function (w) { return normalizeVi_(w); });
 
-  var uni = {}, uniDisp = {};
-  var bi = {}, biDisp = {};
+  var uni = {}, uniDisp = {}, bi = {}, biDisp = {};
   for (var i = 0; i < tokensRaw.length; i++) {
     var nw = norm[i];
     if (nw.length >= 3 && !isStopword_(nw) && !/^\d+$/.test(nw)) {
       uni[nw] = (uni[nw] || 0) + 1;
       if (!uniDisp[nw]) uniDisp[nw] = tokensRaw[i].toLowerCase();
     }
-    // cụm 2 từ (bigram) khi cả 2 từ đều "có nghĩa"
     if (i + 1 < tokensRaw.length) {
       var n1 = norm[i], n2 = norm[i + 1];
       if (n1.length >= 2 && n2.length >= 2 && !isStopword_(n1) && !isStopword_(n2) &&
@@ -991,31 +988,43 @@ function extractKeywords_(text, maxN) {
     }
   }
 
-  // Chọn cụm 2 từ trước (ưu tiên), rồi bổ sung từ đơn KHÔNG nằm trong cụm đã chọn.
+  // Ưu tiên cụm 2 từ; loại từ đơn nằm trong cụm đã chọn.
   var bigrams = Object.keys(bi).filter(function (k) { return bi[k] >= 2; })
     .sort(function (a, b) { return bi[b] - bi[a]; });
   var out = [], usedTok = {};
   for (var p = 0; p < bigrams.length && out.length < maxN; p++) {
     var k = bigrams[p];
-    out.push(biDisp[k]);
-    k.split(' ').forEach(function (w) { usedTok[w] = 1; }); // đánh dấu các từ thành phần
+    out.push({ t: biDisp[k], n: k, f: bi[k] });
+    k.split(' ').forEach(function (w) { usedTok[w] = 1; });
   }
-  var unigrams = Object.keys(uni).filter(function (k) { return uni[k] >= 3 && !usedTok[k]; })
+  var unigrams = Object.keys(uni).filter(function (k) { return uni[k] >= 2 && !usedTok[k]; })
     .sort(function (a, b) { return uni[b] - uni[a]; });
   for (var q = 0; q < unigrams.length && out.length < maxN; q++) {
-    out.push(uniDisp[unigrams[q]]);
+    out.push({ t: uniDisp[unigrams[q]], n: unigrams[q], f: uni[unigrams[q]] });
   }
   return out;
 }
 
-// Tập từ khóa (đã chuẩn hoá) của 1 văn bản.
-function keywordSet_(keywordsStr) {
-  var set = {};
-  String(keywordsStr || '').split(',').forEach(function (k) {
-    var n = normalizeVi_(k).trim();
-    if (n) set[n] = 1;
+function profileToString_(profile) {
+  return profile.map(function (x) { return x.t + '|' + x.f; }).join(', ');
+}
+function parseProfile_(str) {
+  var out = [];
+  String(str || '').split(',').forEach(function (item) {
+    item = item.trim();
+    if (!item) return;
+    var pos = item.lastIndexOf('|');
+    var t = pos === -1 ? item : item.substring(0, pos);
+    var f = pos === -1 ? 1 : (parseInt(item.substring(pos + 1), 10) || 1);
+    var n = normalizeVi_(t).trim();
+    if (n) out.push({ t: t.trim(), n: n, f: f });
   });
-  return set;
+  return out;
+}
+
+// Chuỗi từ khóa để lưu vào CSDL (từ tiêu đề + nội dung).
+function computeKeywords_(text) {
+  return profileToString_(extractTermProfile_(text, 25));
 }
 
 /**
@@ -1026,8 +1035,8 @@ function readRelatedDocs_() {
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
   var n = lastRow - 1;
-  var a = sheet.getRange(2, 1, n, COLS.TITLE + 1).getValues();               // cột 1..7 (không có nội dung)
-  var b = sheet.getRange(2, COLS.ISSUER + 1, n, COLS.KEYWORDS - COLS.ISSUER + 1).getValues(); // ISSUER..KEYWORDS
+  var a = sheet.getRange(2, 1, n, COLS.TITLE + 1).getValues();
+  var b = sheet.getRange(2, COLS.ISSUER + 1, n, COLS.KEYWORDS - COLS.ISSUER + 1).getValues();
   var kOff = COLS.KEYWORDS - COLS.ISSUER;
   var out = [];
   for (var i = 0; i < n; i++) {
@@ -1048,41 +1057,70 @@ function readRelatedDocs_() {
 }
 
 /**
- * Tìm tài liệu liên quan tới 1 văn bản: dựa trên từ khóa chung + cùng loại/đơn vị/thời gian.
+ * Tìm tài liệu liên quan: TF-IDF + cosine trên hồ sơ từ khóa, cộng thưởng cùng
+ * loại/đơn vị/năm. Ưu tiên văn bản chia sẻ từ khóa ĐẶC TRƯNG (hiếm trong kho).
  */
 function getRelatedDocs_(fileId, limit) {
   limit = limit || 8;
   var docs = readRelatedDocs_();
-  var target = null;
-  for (var i = 0; i < docs.length; i++) { if (docs[i].fileId === fileId) { target = docs[i]; break; } }
-  if (!target) return [];
+  var N = docs.length;
+  if (N < 2) return [];
 
-  var tSet = keywordSet_(target.keywords);
-  var tTitle = normalizeVi_(target.title || '');
+  var profiles = docs.map(function (d) { return parseProfile_(d.keywords); });
+
+  // Document frequency + IDF
+  var df = {};
+  for (var i = 0; i < N; i++) {
+    var seen = {};
+    for (var j = 0; j < profiles[i].length; j++) {
+      var t = profiles[i][j].n;
+      if (!seen[t]) { seen[t] = 1; df[t] = (df[t] || 0) + 1; }
+    }
+  }
+  function idf(t) { return Math.log(1 + N / ((df[t] || 0) + 0.5)); }
+
+  // Vector TF-IDF của 1 hồ sơ.
+  function vec(profile) {
+    var v = {}, norm2 = 0;
+    for (var k = 0; k < profile.length; k++) {
+      var t = profile[k].n;
+      var w = (1 + Math.log(profile[k].f)) * idf(t); // tf (log) * idf
+      v[t] = w; norm2 += w * w;
+    }
+    return { v: v, len: Math.sqrt(norm2) || 1 };
+  }
+
+  var ti = -1;
+  for (var x = 0; x < N; x++) if (docs[x].fileId === fileId) { ti = x; break; }
+  if (ti === -1) return [];
+  var target = docs[ti];
+  var tv = vec(profiles[ti]);
   var tYear = (target.issuedDate || '').substring(0, 4);
 
   var scored = [];
-  for (var j = 0; j < docs.length; j++) {
-    var d = docs[j];
-    if (d.fileId === fileId) continue;
-    var score = 0, shared = 0;
-    var dSet = keywordSet_(d.keywords);
-    Object.keys(dSet).forEach(function (k) {
-      if (tSet[k]) shared++;
-      // từ khóa của tài liệu này xuất hiện trong tiêu đề tài liệu đang xem
-      else if (k.length >= 4 && tTitle.indexOf(k) !== -1) score += 3;
-    });
-    score += shared * 10;
-    if (d.docTypeCode && d.docTypeCode === target.docTypeCode) score += 6;
-    if (d.issuer && d.issuer === target.issuer) score += 8;
+  for (var m = 0; m < N; m++) {
+    if (m === ti) continue;
+    var d = docs[m];
+    var ov = vec(profiles[m]);
+    // cosine = dot / (|tv||ov|)
+    var dot = 0, shared = 0;
+    var keys = Object.keys(tv.v);
+    for (var y = 0; y < keys.length; y++) {
+      var t = keys[y];
+      if (ov.v[t]) { dot += tv.v[t] * ov.v[t]; shared++; }
+    }
+    var cosine = dot / (tv.len * ov.len);
+    var score = cosine * 100; // 0..100 theo độ giống nội dung
+    if (d.docTypeCode && d.docTypeCode === target.docTypeCode) score += 5;
+    if (d.issuer && d.issuer === target.issuer) score += 6;
     else if (d.issuerLevel && d.issuerLevel === target.issuerLevel) score += 2;
     if (tYear && (d.issuedDate || '').substring(0, 4) === tYear) score += 2;
 
-    if (score > 0) {
+    if (score >= 3) {
       scored.push({
         fileId: d.fileId, title: d.title, fileName: d.fileName, docType: d.docType,
         docNumber: d.docNumber, issuedDate: d.issuedDate, issuer: d.issuer,
-        shared: shared, score: score
+        shared: shared, similarity: Math.round(cosine * 100), score: score
       });
     }
   }
@@ -1487,7 +1525,7 @@ function ocrOneStep_(d, budgetPages) {
 function finalizeDocAfterOcr_(d) {
   var content = d.content || '';
   // Luôn cập nhật từ khóa theo nội dung mới (kể cả bản đã sửa tay).
-  d.keywords = extractKeywords_((d.title || '') + ' ' + content, 12).join(', ');
+  d.keywords = computeKeywords_((d.title || '') + ' ' + content);
   // Bản đã sửa tay: chỉ giữ nội dung vừa OCR, KHÔNG suy lại metadata (giữ chỉnh sửa của người dùng).
   if (d.edited) return;
   d.title = extractTitle(d.fileName, content) || d.title;
@@ -1752,7 +1790,7 @@ function processFile_(f, existing) {
     status: 'Mới',
     security: 'Thường',
     urgency: 'Thường',
-    keywords: extractKeywords_((title || '') + ' ' + content, 12).join(', ')
+    keywords: computeKeywords_((title || '') + ' ' + content)
   };
   var op = upsertDoc_(doc, existing);
   doc._op = op;
