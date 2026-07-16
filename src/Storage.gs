@@ -24,7 +24,8 @@ var COLS = {
   OCR_PROGRESS: 16,  // Tiến độ OCR dạng 'done/total' (số trang đã OCR / tổng số trang)
   STATUS: 17,        // Trạng thái xử lý
   SECURITY: 18,      // Độ mật
-  URGENCY: 19        // Độ khẩn
+  URGENCY: 19,       // Độ khẩn
+  EDITED: 20         // Đã sửa thông tin bằng tay (bảo vệ metadata, nhưng vẫn OCR nội dung)
 };
 
 var DB_HEADERS = [
@@ -32,7 +33,7 @@ var DB_HEADERS = [
   'Ngày ban hành', 'Trích yếu', 'Nội dung', 'Đường dẫn', 'MimeType',
   'Link Drive', 'Sửa lần cuối', 'Quét lúc', 'OCR',
   'Đơn vị ban hành', 'Cấp ban hành', 'OCR tiến độ',
-  'Trạng thái', 'Độ mật', 'Độ khẩn'
+  'Trạng thái', 'Độ mật', 'Độ khẩn', 'Đã sửa'
 ];
 
 /**
@@ -93,6 +94,7 @@ function getOrCreateDatabase() {
   }
   ensureSheets_(ss);
   migrateIssuedDates_(ss); // chuyển ngày cũ (dạng chữ) sang ngày thật để hiển thị dd/mm/yyyy
+  migrateManualStatus_(ss); // dữ liệu cũ trạng thái 'manual' -> cờ đã sửa
   _dbCache = ss;
   return ss;
 }
@@ -169,6 +171,34 @@ function ensureSheets_(ss) {
   }
 }
 
+// Dữ liệu cũ: ô OCR = 'manual' -> đặt cờ Đã sửa = TRUE, OCR = 'ok' (chạy 1 lần).
+function migrateManualStatus_(ss) {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('MANUAL_FLAG_MIGRATED_V1')) return;
+  try {
+    var docs = ss.getSheetByName(DB_SHEET_DOCS);
+    var lastRow = docs.getLastRow();
+    if (lastRow >= 2 && docs.getLastColumn() >= COLS.EDITED + 1) {
+      var n = lastRow - 1;
+      var ocrCol = docs.getRange(2, COLS.OCR_STATUS + 1, n, 1).getValues();
+      var editedCol = docs.getRange(2, COLS.EDITED + 1, n, 1).getValues();
+      var changed = false;
+      for (var i = 0; i < n; i++) {
+        if (String(ocrCol[i][0]) === 'manual') {
+          ocrCol[i][0] = 'ok';
+          editedCol[i][0] = 'TRUE';
+          changed = true;
+        }
+      }
+      if (changed) {
+        docs.getRange(2, COLS.OCR_STATUS + 1, n, 1).setValues(ocrCol);
+        docs.getRange(2, COLS.EDITED + 1, n, 1).setValues(editedCol);
+      }
+    }
+    props.setProperty('MANUAL_FLAG_MIGRATED_V1', '1');
+  } catch (e) { /* không để migration làm hỏng luồng chính */ }
+}
+
 function getDocsSheet_() {
   return getOrCreateDatabase().getSheetByName(DB_SHEET_DOCS);
 }
@@ -238,7 +268,8 @@ function rowToObj_(r) {
     ocrProgress: cell_(r[COLS.OCR_PROGRESS]),
     status: cell_(r[COLS.STATUS]),
     security: cell_(r[COLS.SECURITY]),
-    urgency: cell_(r[COLS.URGENCY])
+    urgency: cell_(r[COLS.URGENCY]),
+    edited: String(r[COLS.EDITED]).toUpperCase() === 'TRUE'
   };
 }
 
@@ -250,16 +281,19 @@ function getExistingIndex_() {
   var lastRow = sheet.getLastRow();
   var map = {};
   if (lastRow < 2) return map;
-  // Chỉ đọc cột FileId và nhóm cột MODIFIED_TIME..OCR_STATUS -> KHÔNG đọc cột nội dung nặng.
+  // Chỉ đọc cột FileId và nhóm cột MODIFIED_TIME..EDITED -> KHÔNG đọc cột nội dung nặng.
   var n = lastRow - 1;
   var ids = sheet.getRange(2, COLS.FILE_ID + 1, n, 1).getValues();
-  var meta = sheet.getRange(2, COLS.MODIFIED_TIME + 1, n, COLS.OCR_STATUS - COLS.MODIFIED_TIME + 1).getValues();
-  var mOff = 0, oOff = COLS.OCR_STATUS - COLS.MODIFIED_TIME;
+  var meta = sheet.getRange(2, COLS.MODIFIED_TIME + 1, n, COLS.EDITED - COLS.MODIFIED_TIME + 1).getValues();
+  var mOff = 0;
+  var oOff = COLS.OCR_STATUS - COLS.MODIFIED_TIME;
+  var eOff = COLS.EDITED - COLS.MODIFIED_TIME;
   for (var i = 0; i < ids.length; i++) {
     map[ids[i][0]] = {
       rowIndex: i + 2,
       modifiedTime: meta[i][mOff],
-      ocrStatus: meta[i][oOff]
+      ocrStatus: meta[i][oOff],
+      edited: String(meta[i][eOff]).toUpperCase() === 'TRUE'
     };
   }
   return map;
@@ -297,6 +331,7 @@ function docToRow_(d) {
   row[COLS.STATUS] = d.status || '';
   row[COLS.SECURITY] = d.security || '';
   row[COLS.URGENCY] = d.urgency || '';
+  row[COLS.EDITED] = d.edited ? 'TRUE' : '';
   return row;
 }
 
@@ -361,7 +396,8 @@ function updateDocManual(p) {
   if (p.security != null) cur.security = String(p.security).trim();
   if (p.urgency != null) cur.urgency = String(p.urgency).trim();
 
-  cur.ocrStatus = 'manual';
+  // Đánh dấu đã sửa tay (bảo vệ metadata) NHƯNG giữ nguyên ocrStatus để vẫn tiếp tục OCR nội dung.
+  cur.edited = true;
   cur.scannedAt = new Date().toISOString();
   upsertDoc_(cur, existing);
   writeLog_('Sửa tay', 1, cur.fileName);

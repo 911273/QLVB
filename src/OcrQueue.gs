@@ -102,6 +102,8 @@ function ocrOneStep_(d, budgetPages) {
  * Sau khi OCR xong: suy lại loại/số hiệu/ngày/đơn vị/trích yếu từ nội dung (nếu còn thiếu).
  */
 function finalizeDocAfterOcr_(d) {
+  // Bản đã sửa tay: chỉ giữ nội dung vừa OCR, KHÔNG suy lại metadata (giữ chỉnh sửa của người dùng).
+  if (d.edited) return;
   var content = d.content || '';
   d.title = extractTitle(d.fileName, content) || d.title;
   if (!d.docNumber) d.docNumber = extractDocNumber(d.fileName, content);

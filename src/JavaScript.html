@@ -207,6 +207,10 @@ function bindActions() {
   $('#sKeyword').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
   $('#sIssuer').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
   $('#sNumber').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
+  // Tìm kiếm trực tiếp khi gõ (không cần bấm nút), có trễ nhẹ để không gọi liên tục.
+  $('#sKeyword').addEventListener('input', liveSearch);
+  $('#sIssuer').addEventListener('input', liveSearch);
+  $('#sNumber').addEventListener('input', liveSearch);
   $('#sFrom').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
   $('#sTo').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(1); });
   // Đổi bộ lọc là tự tìm lại ngay.
@@ -477,6 +481,12 @@ function doSearch(page, silent) {
     showLoading(false);
     if (res.total === 0 && !silent) toast('Không tìm thấy văn bản phù hợp.');
   }).catch(function (err) { showLoading(false); if (!silent) toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+var liveSearchTimer;
+function liveSearch() {
+  clearTimeout(liveSearchTimer);
+  liveSearchTimer = setTimeout(function () { doSearch(1, true); }, 350);
 }
 
 function doExport() {

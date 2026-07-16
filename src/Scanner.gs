@@ -30,8 +30,9 @@ function scanDrive(options) {
 
     var hit = existing[f.id];
 
-    // Giữ nguyên văn bản đã sửa tay (kể cả khi quét lại toàn bộ) để không mất chỉnh sửa.
-    if (hit && hit.ocrStatus === 'manual') {
+    // Giữ nguyên metadata của văn bản đã sửa tay (không để quét ghi đè). Nội dung vẫn
+    // được OCR riêng qua hàng đợi OCR.
+    if (hit && hit.edited) {
       stats.skipped++;
       continue;
     }
