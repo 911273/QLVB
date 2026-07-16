@@ -267,10 +267,12 @@ function loadStatus() {
 }
 
 function can(perm) { return !!(STATE.me && STATE.me.perms && STATE.me.perms[perm]); }
+// Tài khoản 'free' không hiển thị trạng thái xử lý / độ mật / độ khẩn.
+function showWorkflow() { return !(STATE.me && STATE.me.role === 'free'); }
 
 function renderUserBox() {
   var me = STATE.me || {};
-  var roleLabel = me.role === 'admin' ? 'Quản trị viên' : (me.role === 'editor' ? 'Biên tập' : 'Xem');
+  var roleLabel = roleLabel_(me.role);
   $('#userBox').innerHTML =
     '<span>' + esc(me.name || me.email || '') + ' <span class="tag">' + roleLabel + '</span></span> ' +
     '<button class="btn btn-logout" id="btnLogout">Đăng xuất</button>';
@@ -289,6 +291,9 @@ function applyAcl() {
   toggleEl('#cardAudit', can('accounts'));
   toggleEl('#cardTrash', can('delete'));
   toggleEl('#btnInit', can('config'));
+  // Tài khoản free: ẩn ô lọc trạng thái & độ mật.
+  toggleEl('#fStatus', showWorkflow());
+  toggleEl('#fSecurity', showWorkflow());
 }
 function setTabVisible(name, on) {
   var tab = document.querySelector('.tab[data-tab="' + name + '"]');
@@ -515,9 +520,9 @@ function renderResults(sel, res, keyword) {
         (d.issuer ? '<span>ĐV: <b>' + esc(d.issuer) + '</b>' + (d.issuerLevel ? ' <span class="tag">' + esc(d.issuerLevel) + '</span>' : '') + '</span>' : (d.issuerLevel ? '<span class="tag">' + esc(d.issuerLevel) + '</span>' : '')) +
         '<span>' + esc(d.fileName) + '</span>' +
         '<span class="tag ' + esc(d.ocrStatus) + '">' + ocrLabel(d.ocrStatus) + '</span>' +
-        (d.status ? '<span class="tag st-' + statusClass_(d.status) + '">' + esc(d.status) + '</span>' : '') +
-        (d.security && d.security !== 'Thường' ? '<span class="tag sec">' + esc(d.security) + '</span>' : '') +
-        (d.urgency && d.urgency !== 'Thường' ? '<span class="tag urg">' + esc(d.urgency) + '</span>' : '') +
+        (showWorkflow() && d.status ? '<span class="tag st-' + statusClass_(d.status) + '">' + esc(d.status) + '</span>' : '') +
+        (showWorkflow() && d.security && d.security !== 'Thường' ? '<span class="tag sec">' + esc(d.security) + '</span>' : '') +
+        (showWorkflow() && d.urgency && d.urgency !== 'Thường' ? '<span class="tag urg">' + esc(d.urgency) + '</span>' : '') +
       '</div>' +
       (d.snippet ? '<div class="doc-snippet">' + highlight(esc(d.snippet), terms) + '</div>' : '');
     var actions = el('div', 'doc-actions');
@@ -614,9 +619,9 @@ function openDetail(fileId) {
             (d.docNumber ? chip('Số: ' + d.docNumber) : '') +
             chip('Ngày: ' + fmtDate(d.issuedDate)) +
             (d.issuer ? chip(d.issuer) : '') +
-            (d.status ? chip(d.status) : '') +
-            (d.security && d.security !== 'Thường' ? chip(d.security) : '') +
-            (d.urgency && d.urgency !== 'Thường' ? chip(d.urgency) : '') +
+            (showWorkflow() && d.status ? chip(d.status) : '') +
+            (showWorkflow() && d.security && d.security !== 'Thường' ? chip(d.security) : '') +
+            (showWorkflow() && d.urgency && d.urgency !== 'Thường' ? chip(d.urgency) : '') +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -633,9 +638,9 @@ function openDetail(fileId) {
         row('Số/Ký hiệu', esc(d.docNumber || '—')) +
         row('Đơn vị ban hành', esc(d.issuer || '—')) +
         row('Cấp ban hành', esc(d.issuerLevel || '—')) +
-        row('Trạng thái xử lý', esc(d.status || '—')) +
-        row('Độ mật', esc(d.security || '—')) +
-        row('Độ khẩn', esc(d.urgency || '—')) +
+        (showWorkflow() ? row('Trạng thái xử lý', esc(d.status || '—')) : '') +
+        (showWorkflow() ? row('Độ mật', esc(d.security || '—')) : '') +
+        (showWorkflow() ? row('Độ khẩn', esc(d.urgency || '—')) : '') +
         row('Ngày ban hành', fmtDate(d.issuedDate)) +
         row('Tên file', esc(d.fileName)) +
         row('Đường dẫn', esc(d.folderPath || '/')) +
@@ -1272,7 +1277,9 @@ function renderAccounts() {
     });
   }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
 }
-function roleLabel_(r) { return r === 'admin' ? 'Quản trị viên' : (r === 'editor' ? 'Biên tập' : 'Xem'); }
+function roleLabel_(r) {
+  return { admin: 'Quản trị viên', editor: 'Biên tập', viewer: 'Xem', free: 'Miễn phí' }[r] || 'Xem';
+}
 
 function openAccountEditor(acc) {
   var isNew = !acc;
@@ -1281,7 +1288,7 @@ function openAccountEditor(acc) {
     var label = { view: 'Xem & tìm kiếm', edit: 'Sửa văn bản', delete: 'Xoá văn bản', scan: 'Quét & OCR', config: 'Cấu hình', accounts: 'Quản lý tài khoản' }[k];
     return '<label class="perm-check"><input type="checkbox" data-perm="' + k + '"' + (acc.perms && acc.perms[k] ? ' checked' : '') + '> ' + label + '</label>';
   }).join('');
-  var roleOpts = ['viewer', 'editor', 'admin'].map(function (r) {
+  var roleOpts = ['free', 'viewer', 'editor', 'admin'].map(function (r) {
     return '<option value="' + r + '"' + (r === acc.role ? ' selected' : '') + '>' + roleLabel_(r) + '</option>';
   }).join('');
   var html =
@@ -1303,7 +1310,7 @@ function openAccountEditor(acc) {
   $('#modal').classList.remove('hidden');
   // Chọn vai trò -> tự tick quyền mặc định.
   $('#acRole').addEventListener('change', function () {
-    var preset = { viewer: ['view'], editor: ['view', 'edit', 'scan'], admin: ['view', 'edit', 'delete', 'scan', 'config', 'accounts'] }[this.value] || ['view'];
+    var preset = { free: ['view'], viewer: ['view'], editor: ['view', 'edit', 'scan'], admin: ['view', 'edit', 'delete', 'scan', 'config', 'accounts'] }[this.value] || ['view'];
     $all('[data-perm]').forEach(function (cb) { cb.checked = preset.indexOf(cb.getAttribute('data-perm')) !== -1; });
   });
   $('#btnCancelAccount').addEventListener('click', closeModal);

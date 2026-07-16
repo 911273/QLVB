@@ -2155,7 +2155,8 @@ var PERM_LABELS = {
 function rolePerms_(role) {
   if (role === 'admin') return { view: true, edit: true, delete: true, scan: true, config: true, accounts: true };
   if (role === 'editor') return { view: true, edit: true, delete: false, scan: true, config: false, accounts: false };
-  return { view: true, edit: false, delete: false, scan: false, config: false, accounts: false }; // viewer
+  // 'viewer' và 'free' đều chỉ có quyền xem/tìm kiếm.
+  return { view: true, edit: false, delete: false, scan: false, config: false, accounts: false };
 }
 
 function normalizePerms_(role, perms) {
@@ -2340,7 +2341,8 @@ function saveAccount_(p) {
   if (!p || !p.email) throw new Error('Thiếu email.');
   var email = String(p.email).toLowerCase().trim();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('Email không hợp lệ.');
-  var role = (p.role === 'admin' || p.role === 'editor' || p.role === 'viewer') ? p.role : 'viewer';
+  var validRoles = { admin: 1, editor: 1, viewer: 1, free: 1 };
+  var role = validRoles[p.role] ? p.role : 'viewer';
   var perms = normalizePerms_(role, p.perms);
   var active = p.active !== false;
 
