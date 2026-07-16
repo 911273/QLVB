@@ -299,10 +299,16 @@ function renderUserBox() {
   }
 }
 
+// Cán bộ (từ Biên tập trở lên): có quyền ngoài xem.
+function isStaff() { return can('edit') || can('scan') || can('config') || can('accounts') || can('delete'); }
+
 // Ẩn/hiện tab & nút theo quyền của tài khoản đang đăng nhập.
 function applyAcl() {
-  // Tab Quét chỉ cho quyền scan; tab Cài đặt luôn hiện (ai cũng đổi được mật khẩu).
+  var staff = isStaff();
+  // Khách & tài khoản chỉ-xem KHÔNG thấy Tổng quan, Quét, Cài đặt.
+  setTabVisible('overview', staff);
   setTabVisible('scan', can('scan'));
+  setTabVisible('settings', staff);
   toggleEl('#cardVision', can('config'));
   toggleEl('#cardTypes', can('config'));
   toggleEl('#cardIssuers', can('config'));
@@ -316,6 +322,13 @@ function applyAcl() {
   // Khách chưa đăng nhập: ẩn thẻ đổi mật khẩu.
   var loggedIn = !!(STATE.me && STATE.me.role && STATE.me.role !== 'guest');
   toggleEl('#cardPassword', loggedIn);
+  // Nếu tab đang mở bị ẩn -> chuyển về Tìm kiếm.
+  var active = document.querySelector('.tab.active');
+  if (active && active.style.display === 'none') activateTab('search');
+}
+function activateTab(name) {
+  var tab = document.querySelector('.tab[data-tab="' + name + '"]');
+  if (tab) tab.click();
 }
 function setTabVisible(name, on) {
   var tab = document.querySelector('.tab[data-tab="' + name + '"]');
