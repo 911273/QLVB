@@ -656,6 +656,7 @@ function openDetail(fileId) {
   call('getDetail', { fileId: fileId }).then(function (d) {
     showLoading(false);
     if (!d) { toast('Không tìm thấy văn bản.', 'err'); return; }
+    var an = d.analysisObj || { topic: '', field: '', concepts: [], entities: [], legalRefs: [] };
     var chip = function (t) { return t ? '<span class="chip">' + esc(t) + '</span>' : ''; };
     var html =
       '<div class="detail-head">' +
@@ -664,6 +665,7 @@ function openDetail(fileId) {
           '<h2>' + esc(d.title || d.fileName) + '</h2>' +
           '<div class="detail-chips">' +
             chip(d.docType) +
+            (an.field ? chip('Lĩnh vực: ' + an.field) : '') +
             (d.docNumber ? chip('Số: ' + d.docNumber) : '') +
             chip('Ngày: ' + fmtDate(d.issuedDate)) +
             (d.issuer ? chip(d.issuer) : '') +
@@ -683,6 +685,10 @@ function openDetail(fileId) {
       '<details class="detail-more" id="detailMore" open><summary>Thông tin chi tiết</summary>' +
       '<div class="sys-info" style="margin-top:10px">' +
         row('Loại VB', esc(d.docType) + ' (' + esc(d.docTypeCode) + ')') +
+        (an.topic ? row('Chủ đề', esc(an.topic)) : '') +
+        (an.field ? row('Lĩnh vực', esc(an.field)) : '') +
+        (an.entities && an.entities.length ? row('Đối tượng', esc(an.entities.join(', '))) : '') +
+        (an.legalRefs && an.legalRefs.length ? row('Căn cứ pháp lý', esc(an.legalRefs.join('; '))) : '') +
         row('Số/Ký hiệu', esc(d.docNumber || '—')) +
         row('Đơn vị ban hành', esc(d.issuer || '—')) +
         row('Cấp ban hành', esc(d.issuerLevel || '—')) +
@@ -695,7 +701,7 @@ function openDetail(fileId) {
         row('Trạng thái OCR', (ocrLabel(d.ocrStatus) || '—') + (d.ocrProgress ? ' (' + esc(d.ocrProgress) + ' trang)' : '')) +
         row('Quét lúc', fmtDateTime(d.scannedAt)) +
       '</div></details>' +
-      (d.keywords ? '<h3 style="margin-top:16px">Từ khóa</h3><div class="detail-chips">' +
+      (d.keywords ? '<h3 style="margin-top:16px">Key phrases</h3><div class="detail-chips">' +
         d.keywords.split(',').map(function (k) {
           k = k.trim(); var p = k.lastIndexOf('|'); if (p !== -1) k = k.substring(0, p).trim();
           return k ? '<span class="chip kw">' + esc(k) + '</span>' : '';
@@ -732,7 +738,8 @@ function loadRelated(fileId) {
           (d.docNumber ? ' • Số: ' + esc(d.docNumber) : '') +
           ' • ' + fmtDate(d.issuedDate) +
           (d.similarity ? ' • <span class="tag ok">' + d.similarity + '% giống nội dung</span>' : '') +
-          (d.shared ? ' • ' + d.shared + ' từ khóa chung' : '') +
+          (d.shared ? ' • ' + d.shared + ' khái niệm chung' : '') +
+          (d.sharedRefs ? ' • ' + d.sharedRefs + ' căn cứ chung' : '') +
         '</div></div>';
     }).join('');
     $all('[data-rel]', box).forEach(function (it) {

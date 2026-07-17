@@ -40,10 +40,12 @@ function searchDocs(query) {
     if (query.fromDate && (!d.issuedDate || d.issuedDate < query.fromDate)) return false;
     if (query.toDate && (!d.issuedDate || d.issuedDate > query.toDate)) return false;
     if (terms.length) {
+      // Haystack gồm cả tín hiệu phân tích (key phrases/lĩnh vực/đối tượng/căn cứ pháp lý)
+      // -> tìm theo NỘI DUNG/chủ đề, không chỉ dính chữ trong văn bản.
       var hay = normalizeVi_([
         d.fileName, d.docNumber, d.title, d.docType, d.content, d.folderPath,
         d.issuer, d.issuerLevel
-      ].join(' \n '));
+      ].join(' \n ')) + ' \n ' + analysisSearchText_(d);
       if (exactPhrase) {
         if (hay.indexOf(phrase) === -1) return false; // bắt buộc khớp nguyên cụm
       } else {
@@ -147,13 +149,32 @@ function scoreDoc_(d, phrase, terms, isMultiWord) {
     if (fname.indexOf(phrase) !== -1) score += 40;
     if (issuer.indexOf(phrase) !== -1) score += 40;
   }
-  // Điểm theo từng từ, có trọng số theo trường.
+  // Tín hiệu PHÂN TÍCH NỘI DUNG: ưu tiên tài liệu mà truy vấn khớp key phrase/chủ đề/
+  // lĩnh vực/căn cứ pháp lý (chủ đề đúng), thay vì chỉ dính chữ tình cờ trong nội dung.
+  var a = parseAnalysis_(d.analysis);
+  var kp = normalizeVi_(d.keywords || '');                       // 3–5 key phrases
+  var topic = normalizeVi_(a.topic || '');
+  var field = normalizeVi_(a.field || '');
+  var concepts = a.concepts.map(function (c) { return c.n; }).join(' \n ');
+  var legal = a.legalRefs.map(function (x) { return normalizeVi_(x); }).join(' \n ');
+
+  if (isMultiWord && phrase) {
+    if (kp.indexOf(phrase) !== -1 || topic.indexOf(phrase) !== -1) score += 55;
+    if (concepts.indexOf(phrase) !== -1) score += 30;
+    if (legal.indexOf(phrase) !== -1) score += 45;
+  }
+  // Điểm theo từng từ, có trọng số theo trường + tín hiệu phân tích.
   for (var i = 0; i < terms.length; i++) {
     var t = terms[i];
     if (title.indexOf(t) !== -1) score += 12;
     if (num.indexOf(t) !== -1) score += 10;
     if (issuer.indexOf(t) !== -1) score += 6;
     if (fname.indexOf(t) !== -1) score += 4;
+    if (kp.indexOf(t) !== -1) score += 15;       // khớp key phrase
+    if (topic.indexOf(t) !== -1) score += 10;    // khớp chủ đề
+    if (concepts.indexOf(t) !== -1) score += 8;  // khớp khái niệm
+    if (field.indexOf(t) !== -1) score += 8;     // khớp lĩnh vực
+    if (legal.indexOf(t) !== -1) score += 18;    // khớp căn cứ pháp lý
     score += Math.min(countOcc_(content, t), 5); // tần suất trong nội dung (giới hạn 5)
   }
   return score;
@@ -181,8 +202,10 @@ function makeSnippet_(content, terms, phrase) {
 }
 
 /**
- * Lấy chi tiết 1 văn bản (kèm full content).
+ * Lấy chi tiết 1 văn bản (kèm full content + hồ sơ phân tích đã tách sẵn cho giao diện).
  */
 function getDocDetail(fileId) {
-  return getDocDetailFast_(fileId); // đọc đúng 1 dòng thay vì toàn bộ CSDL -> mở văn bản nhanh
+  var d = getDocDetailFast_(fileId); // đọc đúng 1 dòng thay vì toàn bộ CSDL -> mở văn bản nhanh
+  if (d) d.analysisObj = parseAnalysis_(d.analysis);
+  return d;
 }

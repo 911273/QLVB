@@ -249,3 +249,53 @@ function saveIssuers(issuers) {
     .setProperty(PROP_ISSUERS, JSON.stringify(issuers));
   return getIssuers();
 }
+
+/* ===================== PHÂN TÍCH NỘI DUNG (Analyzer) ===================== */
+/*
+ * Tham số cho động cơ phân tích nội dung. Đặt ở Config để dễ tuỳ chỉnh,
+ * không hardcode rải rác trong thuật toán.
+ */
+var ANALYZER_MAX_KEYPHRASES = 5;   // Số key phrase hiển thị/lưu ở cột "Từ khóa" (3–5).
+var ANALYZER_MAX_CONCEPTS = 12;    // Số khái niệm lưu trong hồ sơ phân tích (phục vụ độ liên quan).
+var ANALYZER_MAX_PHRASE_WORDS = 4; // Độ dài tối đa của một cụm ứng viên (âm tiết); ~2 từ ghép TV.
+var ANALYZER_MAX_ENTITIES = 8;     // Số đối tượng/đơn vị lưu tối đa.
+var ANALYZER_MAX_LEGALREFS = 10;   // Số căn cứ pháp lý/tiêu chuẩn lưu tối đa.
+var ANALYSIS_TEXT_LIMIT = 12000;   // Số ký tự nội dung dùng để phân tích (đủ đại diện, tránh chậm).
+
+/**
+ * Từ điển LĨNH VỰC (không dấu, thường). Dùng để suy ra "lĩnh vực" của văn bản
+ * theo số từ khoá khớp trong tiêu đề + nội dung + key phrases.
+ */
+function getFieldDictionary() {
+  return [
+    { field: 'Đào tạo', keywords: ['dao tao', 'tin chi', 'hoc phan', 'tuyen sinh', 'chuong trinh dao tao', 'tot nghiep', 'giang day', 'hoc vu', 'thoi khoa bieu', 'do an', 'khoa luan'] },
+    { field: 'Tổ chức - Cán bộ', keywords: ['to chuc can bo', 'nhan su', 'bo nhiem', 'vien chuc', 'tuyen dung', 'hop dong lam viec', 'dieu dong', 'thi dua khen thuong', 'ky luat'] },
+    { field: 'Tài chính - Kế toán', keywords: ['tai chinh', 'ke toan', 'ngan sach', 'thu chi', 'hoc phi', 'mua sam', 'dau thau', 'quyet toan', 'kinh phi', 'dinh muc', 'thanh toan'] },
+    { field: 'Khoa học - Công nghệ', keywords: ['khoa hoc', 'cong nghe', 'nghien cuu', 'de tai', 'sang kien', 'hoi thao', 'hoi nghi khoa hoc', 'cong bo', 'so huu tri tue'] },
+    { field: 'Công tác sinh viên', keywords: ['cong tac sinh vien', 'hoc bong', 'ren luyen', 'ky luat sinh vien', 'noi tru', 'ngoai tru', 'bao hiem y te', 'chinh sach sinh vien'] },
+    { field: 'Hành chính - Văn thư', keywords: ['hanh chinh', 'van thu', 'luu tru', 'con dau', 'cong van den', 'cong van di', 'lich cong tac'] },
+    { field: 'Cơ sở vật chất', keywords: ['co so vat chat', 'thiet bi', 'phong hoc', 'ky tuc xa', 'sua chua', 'xay dung', 'quan ly tai san'] },
+    { field: 'Hợp tác quốc tế', keywords: ['hop tac quoc te', 'doi ngoai', 'nuoc ngoai', 'lien ket quoc te', 'trao doi sinh vien'] },
+    { field: 'Đảm bảo chất lượng', keywords: ['dam bao chat luong', 'kiem dinh', 'danh gia chat luong', 'khao thi', 'chuan dau ra'] }
+  ];
+}
+
+/**
+ * Bộ trọng số cho tính TÀI LIỆU LIÊN QUAN (đa yếu tố). Tách khỏi thuật toán để dễ tinh chỉnh.
+ * threshold: điểm tối thiểu để coi là "liên quan".
+ */
+function getRelatedWeights() {
+  return {
+    cosine: 100,   // hệ số cho độ tương đồng nội dung (cosine 0..1)
+    legalRef: 14,  // mỗi căn cứ pháp lý/tiêu chuẩn dùng chung
+    legalRefCap: 3,// tối đa số căn cứ dùng chung được tính điểm
+    field: 8,      // cùng lĩnh vực
+    titleTerm: 3,  // mỗi từ khoá tiêu đề trùng nhau
+    titleTermCap: 4,
+    sameType: 5,   // cùng loại văn bản
+    sameIssuer: 6, // cùng đơn vị ban hành
+    sameLevel: 2,  // cùng cấp ban hành (khi khác đơn vị)
+    sameYear: 2,   // cùng năm ban hành
+    threshold: 4
+  };
+}

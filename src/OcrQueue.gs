@@ -103,8 +103,8 @@ function ocrOneStep_(d, budgetPages) {
  */
 function finalizeDocAfterOcr_(d) {
   var content = d.content || '';
-  // Luôn cập nhật từ khóa theo nội dung mới (kể cả bản đã sửa tay).
-  d.keywords = computeKeywords_((d.title || '') + ' ' + content);
+  // Luôn cập nhật key phrases + hồ sơ phân tích theo nội dung mới (kể cả bản đã sửa tay).
+  analyzeAndAttach_(d);
   // Bản đã sửa tay: chỉ giữ nội dung vừa OCR, KHÔNG suy lại metadata (giữ chỉnh sửa của người dùng).
   if (d.edited) return;
   d.title = extractTitle(d.fileName, content) || d.title;

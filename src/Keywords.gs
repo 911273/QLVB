@@ -1,9 +1,11 @@
 /**
  * Keywords.gs
- * Phân tích nội dung: trích "hồ sơ từ khóa" (term + tần suất) cho mỗi văn bản, và
- * tìm TÀI LIỆU LIÊN QUAN bằng TF-IDF + độ tương đồng cosine (ưu tiên từ khóa đặc trưng).
+ * Tầng TỪ VỰNG: tách token, lọc từ dừng, và trích KEY PHRASES chất lượng bằng RAKE
+ * (Rapid Automatic Keyword Extraction) — chọn cụm theo điểm degree/freq, ưu tiên cụm
+ * danh từ/thuật ngữ, khử trùng lặp/gần giống, KHÔNG thuần theo tần suất.
  *
- * Cột "Từ khóa" lưu dạng: "khoa học|8, công nghệ|5, quy chế|4, ..." (term|tần suất).
+ * Cột "Từ khóa" lưu 3–5 key phrase dạng: "khoa hoc cong nghe|9, quy che dao tao|7, ..."
+ * (cụm hiển thị | trọng số). Phân tích nội dung & tài liệu liên quan nằm ở Analyzer.gs.
  */
 
 var VI_STOPWORDS = {
@@ -14,59 +16,119 @@ var VI_STOPWORDS = {
   'se': 1, 'dang': 1, 'bi': 1, 'phai': 1, 'con': 1, 'nen': 1, 'tren': 1, 'duoi': 1, 'giua': 1,
   'ngoai': 1, 'cai': 1, 'nao': 1, 'gi': 1, 'ai': 1, 'dau': 1, 'sao': 1, 'the': 1, 'vi': 1,
   'nham': 1, 'qua': 1, 'lai': 1, 'nua': 1, 'chi': 1, 'chua': 1, 'hay': 1, 'tuy': 1, 'tuc': 1,
-  'so': 1, 'ngay': 1, 'thang': 1, 'nam': 1, 'viec': 1
+  'so': 1, 'ngay': 1, 'thang': 1, 'nam': 1, 'viec': 1, 'kem': 1, 'gom': 1, 'moi': 1, 'toan': 1,
+  'thuc hien': 0
 };
-function isStopword_(nw) { return !!VI_STOPWORDS[nw]; }
+function isStopword_(nw) { return VI_STOPWORDS[nw] === 1; }
 
 /**
- * Trích hồ sơ term của 1 văn bản: mảng {t: hiển thị, n: chuẩn hoá, f: tần suất}.
- * Ưu tiên cụm 2 từ có nghĩa, kèm từ đơn đặc trưng.
+ * Tách văn bản thành danh sách token {d: hiển thị (thường), n: chuẩn hoá không dấu}.
  */
-function extractTermProfile_(text, maxN) {
-  maxN = maxN || 25;
-  if (!text) return [];
-  var raw = String(text).substring(0, 12000);
-  var tokensRaw = raw.replace(/[^0-9A-Za-zÀ-ỹ\s]/g, ' ').split(/\s+/).filter(Boolean);
-  var norm = tokensRaw.map(function (w) { return normalizeVi_(w); });
+function tokenizeVi_(text) {
+  var raw = String(text || '').substring(0, ANALYSIS_TEXT_LIMIT).toLowerCase();
+  var words = raw.replace(/[^0-9a-zà-ỹ\s]/gi, ' ').split(/\s+/).filter(Boolean);
+  return words.map(function (w) { return { d: w, n: normalizeVi_(w) }; });
+}
 
-  var uni = {}, uniDisp = {}, bi = {}, biDisp = {};
-  for (var i = 0; i < tokensRaw.length; i++) {
-    var nw = norm[i];
-    if (nw.length >= 3 && !isStopword_(nw) && !/^\d+$/.test(nw)) {
-      uni[nw] = (uni[nw] || 0) + 1;
-      if (!uniDisp[nw]) uniDisp[nw] = tokensRaw[i].toLowerCase();
+/**
+ * Trích KEY PHRASES bằng RAKE.
+ *  - Cắt văn bản thành cụm ứng viên tại các từ dừng / số / token quá ngắn.
+ *  - Điểm mỗi từ = degree/freq (degree = tổng bậc đồng xuất hiện trong cụm).
+ *  - Điểm cụm = tổng điểm từ; ưu tiên cụm nhiều từ (danh từ ghép) và cụm lặp lại.
+ *  - Khử trùng lặp/gần giống (bao hàm token hoặc trùng >= 60%).
+ * Trả mảng {t: hiển thị, n: chuẩn hoá, f: trọng số nguyên} đã xếp theo điểm giảm dần.
+ */
+function extractKeyphrases_(text, maxN) {
+  maxN = maxN || ANALYZER_MAX_KEYPHRASES;
+  var raw = String(text || '').substring(0, ANALYSIS_TEXT_LIMIT).toLowerCase();
+  if (!raw.trim()) return [];
+
+  var maxLen = ANALYZER_MAX_PHRASE_WORDS;
+
+  // (1) Cắt thành ĐOẠN ứng viên: trước hết theo dấu câu (ranh giới câu/cụm), rồi theo
+  //     từ dừng / số / token quá ngắn — KHÔNG để cụm bắc qua dấu câu hay từ dừng.
+  var segs = [], cur = [];
+  function isBoundary(t) { return isStopword_(t.n) || t.n.length < 2 || /^\d+$/.test(t.n); }
+  function flushSeg() { if (cur.length) { segs.push(cur); cur = []; } }
+  var chunks = raw.split(/[^0-9a-zà-ỹ\s]+/); // tách tại dấu câu / ký tự đặc biệt
+  for (var ci = 0; ci < chunks.length; ci++) {
+    var words = chunks[ci].split(/\s+/).filter(Boolean);
+    for (var wi = 0; wi < words.length; wi++) {
+      var t = { d: words[wi], n: normalizeVi_(words[wi]) };
+      if (isBoundary(t)) flushSeg();
+      else cur.push(t);
     }
-    if (i + 1 < tokensRaw.length) {
-      var n1 = norm[i], n2 = norm[i + 1];
-      if (n1.length >= 2 && n2.length >= 2 && !isStopword_(n1) && !isStopword_(n2) &&
-          !/^\d+$/.test(n1) && !/^\d+$/.test(n2)) {
-        var key = n1 + ' ' + n2;
-        bi[key] = (bi[key] || 0) + 1;
-        if (!biDisp[key]) biDisp[key] = (tokensRaw[i] + ' ' + tokensRaw[i + 1]).toLowerCase();
+    flushSeg(); // hết một chunk -> đóng đoạn (không bắc qua dấu câu)
+  }
+  if (!segs.length) return [];
+
+  // (2) RAKE: freq & degree cho từng từ dựa trên đồng xuất hiện trong đoạn.
+  var freq = {}, degree = {};
+  for (var p = 0; p < segs.length; p++) {
+    var deg = segs[p].length;
+    for (var w = 0; w < segs[p].length; w++) {
+      var n = segs[p][w].n;
+      freq[n] = (freq[n] || 0) + 1;
+      degree[n] = (degree[n] || 0) + deg;
+    }
+  }
+  function wscore(n) { return degree[n] / freq[n]; }
+
+  // (3) Sinh cụm ứng viên (n-gram dài 1..maxLen trong mỗi đoạn), gộp trùng, tính điểm.
+  var byKey = {}, cand = [];
+  for (var s = 0; s < segs.length; s++) {
+    var seg = segs[s];
+    for (var L = 1; L <= maxLen; L++) {
+      for (var st = 0; st + L <= seg.length; st++) {
+        var g = seg.slice(st, st + L);
+        var nkey = g.map(function (x) { return x.n; }).join(' ');
+        if (byKey[nkey]) { byKey[nkey].occ++; continue; }
+        var disp = g.map(function (x) { return x.d; }).join(' ');
+        var base = 0;
+        for (var r = 0; r < g.length; r++) base += wscore(g[r].n);
+        byKey[nkey] = { t: disp, n: nkey, len: L, base: base, occ: 1 };
+        cand.push(byKey[nkey]);
       }
     }
   }
+  // Điểm cuối: điểm RAKE * thưởng cụm nhiều từ * hệ số lần xuất hiện (không thuần tần suất).
+  cand.forEach(function (c) {
+    var mult = (c.len > 1 ? 1.4 : 1) * (1 + Math.log(c.occ));
+    c.score = c.base * mult;
+  });
+  cand.sort(function (a, b) { return b.score - a.score; });
 
-  // Ưu tiên cụm 2 từ; loại từ đơn nằm trong cụm đã chọn.
-  var bigrams = Object.keys(bi).filter(function (k) { return bi[k] >= 2; })
-    .sort(function (a, b) { return bi[b] - bi[a]; });
-  var out = [], usedTok = {};
-  for (var p = 0; p < bigrams.length && out.length < maxN; p++) {
-    var k = bigrams[p];
-    out.push({ t: biDisp[k], n: k, f: bi[k] });
-    k.split(' ').forEach(function (w) { usedTok[w] = 1; });
+  // Khử trùng lặp/gần giống, giữ tối đa maxN.
+  var kept = [];
+  for (var k = 0; k < cand.length && kept.length < maxN; k++) {
+    var c2 = cand[k];
+    var dup = false;
+    for (var j = 0; j < kept.length; j++) {
+      if (phrasesNearDuplicate_(c2.n, kept[j].n)) { dup = true; break; }
+    }
+    if (!dup) kept.push(c2);
   }
-  var unigrams = Object.keys(uni).filter(function (k) { return uni[k] >= 2 && !usedTok[k]; })
-    .sort(function (a, b) { return uni[b] - uni[a]; });
-  for (var q = 0; q < unigrams.length && out.length < maxN; q++) {
-    out.push({ t: uniDisp[unigrams[q]], n: unigrams[q], f: uni[unigrams[q]] });
-  }
-  return out;
+  return kept.map(function (c) { return { t: c.t, n: c.n, f: Math.max(1, Math.round(c.score)) }; });
 }
 
+/**
+ * Hai cụm coi là "gần trùng" nếu một cụm chứa trọn cụm kia (theo token), hoặc trùng >= 60% token.
+ */
+function phrasesNearDuplicate_(a, b) {
+  if (a === b) return true;
+  var ta = a.split(' '), tb = b.split(' ');
+  var setB = {}; tb.forEach(function (w) { setB[w] = 1; });
+  var inter = 0; ta.forEach(function (w) { if (setB[w]) inter++; });
+  if (inter === ta.length || inter === tb.length) return true; // bao hàm
+  var uni = ta.length + tb.length - inter;
+  return uni > 0 && (inter / uni) >= 0.6;
+}
+
+/** Chuỗi lưu CSDL từ hồ sơ cụm. */
 function profileToString_(profile) {
   return profile.map(function (x) { return x.t + '|' + x.f; }).join(', ');
 }
+/** Đọc chuỗi "cụm|trọng số, ..." thành mảng {t, n, f}. */
 function parseProfile_(str) {
   var out = [];
   String(str || '').split(',').forEach(function (item) {
@@ -81,108 +143,10 @@ function parseProfile_(str) {
   return out;
 }
 
-// Chuỗi từ khóa để lưu vào CSDL (từ tiêu đề + nội dung).
+/**
+ * Chuỗi 3–5 key phrase để lưu cột "Từ khóa" (từ tiêu đề + nội dung).
+ * Giữ tên hàm cũ để các nơi đang gọi không phải đổi.
+ */
 function computeKeywords_(text) {
-  return profileToString_(extractTermProfile_(text, 25));
-}
-
-/**
- * Đọc "nhẹ" các cột cần cho tính liên quan (không đọc nội dung).
- */
-function readRelatedDocs_() {
-  var sheet = getDocsSheet_();
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-  var n = lastRow - 1;
-  var a = sheet.getRange(2, 1, n, COLS.TITLE + 1).getValues();
-  var b = sheet.getRange(2, COLS.ISSUER + 1, n, COLS.KEYWORDS - COLS.ISSUER + 1).getValues();
-  var kOff = COLS.KEYWORDS - COLS.ISSUER;
-  var out = [];
-  for (var i = 0; i < n; i++) {
-    out.push({
-      fileId: cell_(a[i][COLS.FILE_ID]),
-      fileName: cell_(a[i][COLS.FILE_NAME]),
-      docType: cell_(a[i][COLS.DOC_TYPE]),
-      docTypeCode: cell_(a[i][COLS.DOC_TYPE_CODE]),
-      docNumber: cell_(a[i][COLS.DOC_NUMBER]),
-      issuedDate: dateCell_(a[i][COLS.ISSUED_DATE]),
-      title: cell_(a[i][COLS.TITLE]),
-      issuer: cell_(b[i][0]),
-      issuerLevel: cell_(b[i][1]),
-      keywords: cell_(b[i][kOff])
-    });
-  }
-  return out;
-}
-
-/**
- * Tìm tài liệu liên quan: TF-IDF + cosine trên hồ sơ từ khóa, cộng thưởng cùng
- * loại/đơn vị/năm. Ưu tiên văn bản chia sẻ từ khóa ĐẶC TRƯNG (hiếm trong kho).
- */
-function getRelatedDocs_(fileId, limit) {
-  limit = limit || 8;
-  var docs = readRelatedDocs_();
-  var N = docs.length;
-  if (N < 2) return [];
-
-  var profiles = docs.map(function (d) { return parseProfile_(d.keywords); });
-
-  // Document frequency + IDF
-  var df = {};
-  for (var i = 0; i < N; i++) {
-    var seen = {};
-    for (var j = 0; j < profiles[i].length; j++) {
-      var t = profiles[i][j].n;
-      if (!seen[t]) { seen[t] = 1; df[t] = (df[t] || 0) + 1; }
-    }
-  }
-  function idf(t) { return Math.log(1 + N / ((df[t] || 0) + 0.5)); }
-
-  // Vector TF-IDF của 1 hồ sơ.
-  function vec(profile) {
-    var v = {}, norm2 = 0;
-    for (var k = 0; k < profile.length; k++) {
-      var t = profile[k].n;
-      var w = (1 + Math.log(profile[k].f)) * idf(t); // tf (log) * idf
-      v[t] = w; norm2 += w * w;
-    }
-    return { v: v, len: Math.sqrt(norm2) || 1 };
-  }
-
-  var ti = -1;
-  for (var x = 0; x < N; x++) if (docs[x].fileId === fileId) { ti = x; break; }
-  if (ti === -1) return [];
-  var target = docs[ti];
-  var tv = vec(profiles[ti]);
-  var tYear = (target.issuedDate || '').substring(0, 4);
-
-  var scored = [];
-  for (var m = 0; m < N; m++) {
-    if (m === ti) continue;
-    var d = docs[m];
-    var ov = vec(profiles[m]);
-    // cosine = dot / (|tv||ov|)
-    var dot = 0, shared = 0;
-    var keys = Object.keys(tv.v);
-    for (var y = 0; y < keys.length; y++) {
-      var t = keys[y];
-      if (ov.v[t]) { dot += tv.v[t] * ov.v[t]; shared++; }
-    }
-    var cosine = dot / (tv.len * ov.len);
-    var score = cosine * 100; // 0..100 theo độ giống nội dung
-    if (d.docTypeCode && d.docTypeCode === target.docTypeCode) score += 5;
-    if (d.issuer && d.issuer === target.issuer) score += 6;
-    else if (d.issuerLevel && d.issuerLevel === target.issuerLevel) score += 2;
-    if (tYear && (d.issuedDate || '').substring(0, 4) === tYear) score += 2;
-
-    if (score >= 3) {
-      scored.push({
-        fileId: d.fileId, title: d.title, fileName: d.fileName, docType: d.docType,
-        docNumber: d.docNumber, issuedDate: d.issuedDate, issuer: d.issuer,
-        shared: shared, similarity: Math.round(cosine * 100), score: score
-      });
-    }
-  }
-  scored.sort(function (a, b) { return b.score - a.score; });
-  return scored.slice(0, limit);
+  return profileToString_(extractKeyphrases_(text, ANALYZER_MAX_KEYPHRASES));
 }

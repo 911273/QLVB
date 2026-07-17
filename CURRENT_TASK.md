@@ -2,117 +2,67 @@
 
 ## Feature
 
-Administrator Database Folder Settings
+Content-based Search & Document Discovery (Nâng cao tìm kiếm & khám phá tài liệu)
 
 ---
 
 ## WHY
 
-Hiện tại vị trí thư mục Google Drive của cơ sở dữ liệu được cấu hình cố định.
+Hệ thống hiện tìm kiếm theo từ khóa/substring đơn giản và sinh quá nhiều từ khóa
+theo tần suất. Cần chuyển sang tìm kiếm theo NỘI DUNG tài liệu: mỗi tài liệu được
+phân tích để rút cụm từ khóa chất lượng, chủ đề, lĩnh vực, khái niệm, đối tượng,
+căn cứ pháp lý; và gợi ý tài liệu liên quan chính xác hơn theo nhiều yếu tố.
 
-Khi cần chuyển sang thư mục khác phải sửa source code.
-
-Mục tiêu là cho phép Administrator thay đổi vị trí thư mục mà không cần chỉnh sửa mã nguồn.
-
----
-
-## Business Requirements
-
-Chỉ tài khoản Administrator được phép:
-
-- Xem cấu hình thư mục cơ sở dữ liệu.
-- Thay đổi thư mục cơ sở dữ liệu.
-- Lưu cấu hình mới.
-
-Người dùng thông thường:
-
-- Không nhìn thấy chức năng này.
-- Không được biết Folder ID.
-- Không được biết URL Google Drive.
+Ràng buộc nền tảng: chạy trong Google Apps Script, KHÔNG gọi API ngoài
+(không sửa appsscript.json/OAuth, không tốn quota) — dùng thuật toán từ vựng +
+cấu trúc (RAKE key phrases + trích khái niệm/đối tượng/căn cứ pháp lý + TF-IDF đa yếu tố).
 
 ---
 
-## Functional Requirements
+## Requirements
 
-Thêm mục "Database Storage" trong trang quản trị.
-
-Administrator có thể:
-
-- Dán URL Google Drive Folder.
-- Hoặc nhập trực tiếp Folder ID.
-
-Hệ thống phải:
-
-- Tự trích xuất Folder ID nếu người dùng nhập URL.
-- Kiểm tra Folder có tồn tại.
-- Kiểm tra ứng dụng có quyền truy cập Folder.
-- Lưu cấu hình khi hợp lệ.
-- Hiển thị thông báo lỗi khi không hợp lệ.
-
-Sau khi lưu:
-
-Toàn bộ chức năng Scanner, OCR, Search và Storage phải sử dụng Folder mới.
-
-Không cần khởi động lại ứng dụng.
-
----
-
-## Validation
-
-Chấp nhận:
-
-https://drive.google.com/drive/folders/...
-
-hoặc
-
-Folder ID.
-
-Không chấp nhận:
-
-- URL không hợp lệ.
-- Folder không tồn tại.
-- Folder không có quyền truy cập.
+1. Key phrases: mỗi tài liệu chỉ 3–5 cụm giá trị nhất; ưu tiên cụm danh từ/thuật ngữ;
+   loại từ dừng/cụm vô nghĩa; khử trùng lặp/gần giống; không thuần theo tần suất.
+2. Phân tích nội dung: chủ đề chính, lĩnh vực, khái niệm quan trọng, đối tượng,
+   căn cứ pháp lý/tiêu chuẩn (nếu có). Lưu để tái sử dụng.
+3. Tài liệu liên quan: 5–10, kết hợp chủ đề + nội dung + từ khóa + tiêu đề + danh mục + metadata.
+4. Kiến trúc: module hóa, dễ mở rộng/bảo trì, không duplicate, không phá chức năng cũ.
+5. Hiệu năng: chỉ phân tích khi OCR xong hoặc khi cập nhật; KHÔNG tính lại mỗi lần tìm kiếm; lưu kết quả.
+6. Ưu tiên: chính xác > mở rộng > bảo trì > hiệu năng; không chọn giải pháp nhanh nhưng khó mở rộng.
 
 ---
 
 ## Files Allowed
 
-Config.gs
-
-Storage.gs
-
-Code.gs
-
-JavaScript.html (Settings)
-
----
+- Config.gs        (hằng số: tham số RAKE, từ điển lĩnh vực, trọng số liên quan)
+- Storage.gs       (thêm cột ANALYSIS ở cuối, hook cập nhật, migration backfill)
+- Keywords.gs      (RAKE key phrases 3–5, khử trùng lặp)
+- Analyzer.gs      (MỚI: phân tích nội dung + tài liệu liên quan đa yếu tố)
+- OcrQueue.gs      (hook phân tích khi OCR xong)
+- Scanner.gs       (hook phân tích khi quét văn bản đọc được text)
+- Search.gs        (xếp hạng theo nội dung: keyphrase/concept/field/legalRef)
+- Code.gs          (getDetail trả hồ sơ phân tích cho UI)
+- JavaScript.html  (hiển thị chủ đề/lĩnh vực/key phrases ở cửa sổ chi tiết)
+- Index.html       (nếu cần khung hiển thị tối thiểu)
 
 ## Files Forbidden
 
-Scanner.gs
-
-Search.gs
-
-Classifier.gs
-
-Stylesheet.html
+- Stylesheet.html  (không sửa CSS)
+- Classifier.gs    (giữ nguyên bộ phân loại loại VB)
+- appsscript.json  (không đổi OAuth/scope)
 
 ---
 
+## Data Model change
+
+- Thêm 1 cột "Phân tích" (ANALYSIS) ở CUỐI sheet VanBan (không đổi tên/thứ tự cột cũ).
+- Nội dung: JSON { topic, field, concepts[], entities[], legalRefs[] }.
+- Cột "Từ khóa" (KEYWORDS) lưu 3–5 key phrases dạng "cụm|trọng số".
+
 ## Success Criteria
 
-✓ Administrator có thể đổi Database Folder.
-
-✓ Không cần sửa source code.
-
-✓ Người dùng thường không nhìn thấy chức năng này.
-
-✓ Hệ thống tiếp tục hoạt động với Folder mới.
-
-## Migration
-
-Khi Administrator đổi Database Folder:
-
-- Không tự động di chuyển dữ liệu cũ.
-- Chỉ cập nhật cấu hình sử dụng Folder mới.
-- Dữ liệu trong Folder cũ vẫn được giữ nguyên.
+✓ Mỗi tài liệu có 3–5 key phrases chất lượng, không trùng lặp.
+✓ Có hồ sơ phân tích (chủ đề/lĩnh vực/khái niệm/đối tượng/căn cứ pháp lý) lưu lại.
+✓ Tài liệu liên quan 5–10, xếp hạng đa yếu tố.
+✓ Phân tích chỉ chạy khi OCR xong / cập nhật, không chạy khi tìm kiếm.
+✓ Tương thích ngược CSDL cũ (migration backfill), không phá chức năng hiện có.

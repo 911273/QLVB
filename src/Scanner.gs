@@ -160,8 +160,10 @@ function processFile_(f, existing) {
     status: 'Mới',
     security: 'Thường',
     urgency: 'Thường',
-    keywords: computeKeywords_((title || '') + ' ' + content)
+    keywords: '',
+    analysis: ''
   };
+  analyzeAndAttach_(doc); // tính key phrases + hồ sơ phân tích (nội dung có thể rỗng nếu chờ OCR)
   var op = upsertDoc_(doc, existing);
   doc._op = op;
   return doc;

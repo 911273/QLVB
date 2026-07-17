@@ -26,7 +26,8 @@ var COLS = {
   SECURITY: 18,      // Độ mật
   URGENCY: 19,       // Độ khẩn
   EDITED: 20,        // Đã sửa thông tin bằng tay (bảo vệ metadata, nhưng vẫn OCR nội dung)
-  KEYWORDS: 21       // Từ khóa tự trích (phục vụ tìm tài liệu liên quan)
+  KEYWORDS: 21,      // 3–5 key phrase (cụm|trọng số) - hiển thị & hỗ trợ độ liên quan
+  ANALYSIS: 22       // Hồ sơ phân tích nội dung (JSON: topic/field/concepts/entities/legalRefs)
 };
 
 var DB_HEADERS = [
@@ -34,7 +35,7 @@ var DB_HEADERS = [
   'Ngày ban hành', 'Trích yếu', 'Nội dung', 'Đường dẫn', 'MimeType',
   'Link Drive', 'Sửa lần cuối', 'Quét lúc', 'OCR',
   'Đơn vị ban hành', 'Cấp ban hành', 'OCR tiến độ',
-  'Trạng thái', 'Độ mật', 'Độ khẩn', 'Đã sửa', 'Từ khóa'
+  'Trạng thái', 'Độ mật', 'Độ khẩn', 'Đã sửa', 'Từ khóa', 'Phân tích'
 ];
 
 /**
@@ -97,6 +98,7 @@ function getOrCreateDatabase() {
   migrateIssuedDates_(ss); // chuyển ngày cũ (dạng chữ) sang ngày thật để hiển thị dd/mm/yyyy
   migrateManualStatus_(ss); // dữ liệu cũ trạng thái 'manual' -> cờ đã sửa
   migrateKeywords_(ss);     // tính từ khóa cho văn bản cũ đã có nội dung (1 lần)
+  migrateAnalysis_(ss);     // tính hồ sơ phân tích + key phrases mới cho văn bản cũ (1 lần)
   _dbCache = ss;
   return ss;
 }
@@ -326,6 +328,55 @@ function migrateKeywords_(ss) {
   } catch (e) { /* không để migration làm hỏng luồng chính */ }
 }
 
+/**
+ * Backfill hồ sơ phân tích (cột "Phân tích") + key phrases 3–5 cho văn bản cũ đã có nội dung.
+ * Chạy MỘT LẦN, theo lô, đọc các cột cần thiết một lượt rồi ghi một lượt (tiết kiệm quota).
+ */
+var ANALYSIS_MIGRATE_BATCH = 60; // Số dòng backfill mỗi lượt -> tránh timeout với kho lớn.
+function migrateAnalysis_(ss) {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('ANALYSIS_MIGRATED_V1')) return;
+  try {
+    var docs = ss.getSheetByName(DB_SHEET_DOCS);
+    var lastRow = docs.getLastRow();
+    if (lastRow < 2 || docs.getLastColumn() < COLS.ANALYSIS + 1) {
+      props.setProperty('ANALYSIS_MIGRATED_V1', '1');
+      return;
+    }
+    var n = lastRow - 1;
+    // Xử lý theo lô, ghi nhớ con trỏ giữa các lần chạy để không vượt giới hạn 6 phút.
+    var start = parseInt(props.getProperty('ANALYSIS_MIGRATE_CURSOR'), 10) || 0;
+    var count = Math.min(ANALYSIS_MIGRATE_BATCH, n - start);
+    if (count <= 0) {
+      props.setProperty('ANALYSIS_MIGRATED_V1', '1');
+      props.deleteProperty('ANALYSIS_MIGRATE_CURSOR');
+      return;
+    }
+    var block = docs.getRange(2 + start, 1, count, COLS.ANALYSIS + 1).getValues();
+    var kws = [], anas = [], changed = false;
+    for (var i = 0; i < count; i++) {
+      var d = rowToObj_(block[i]);
+      if ((String(d.title || '') + String(d.content || '')).trim()) {
+        analyzeAndAttach_(d);
+        kws.push([d.keywords]); anas.push([d.analysis]); changed = true;
+      } else {
+        kws.push([block[i][COLS.KEYWORDS]]); anas.push([block[i][COLS.ANALYSIS]]);
+      }
+    }
+    if (changed) {
+      docs.getRange(2 + start, COLS.KEYWORDS + 1, count, 1).setValues(kws);
+      docs.getRange(2 + start, COLS.ANALYSIS + 1, count, 1).setValues(anas);
+    }
+    var next = start + count;
+    if (next >= n) {
+      props.setProperty('ANALYSIS_MIGRATED_V1', '1');
+      props.deleteProperty('ANALYSIS_MIGRATE_CURSOR');
+    } else {
+      props.setProperty('ANALYSIS_MIGRATE_CURSOR', String(next));
+    }
+  } catch (e) { Logger.log('migrateAnalysis_ error: ' + e); }
+}
+
 function getDocsSheet_() {
   return getOrCreateDatabase().getSheetByName(DB_SHEET_DOCS);
 }
@@ -397,7 +448,8 @@ function rowToObj_(r) {
     security: cell_(r[COLS.SECURITY]),
     urgency: cell_(r[COLS.URGENCY]),
     edited: String(r[COLS.EDITED]).toUpperCase() === 'TRUE',
-    keywords: cell_(r[COLS.KEYWORDS])
+    keywords: cell_(r[COLS.KEYWORDS]),
+    analysis: cell_(r[COLS.ANALYSIS])
   };
 }
 
@@ -461,6 +513,7 @@ function docToRow_(d) {
   row[COLS.URGENCY] = d.urgency || '';
   row[COLS.EDITED] = d.edited ? 'TRUE' : '';
   row[COLS.KEYWORDS] = d.keywords || '';
+  row[COLS.ANALYSIS] = d.analysis || '';
   return row;
 }
 
@@ -519,14 +572,16 @@ function updateDocManual(p) {
   if (p.issuedDate != null) cur.issuedDate = normalizeDateInput_(p.issuedDate);
   if (p.title != null) cur.title = String(p.title);
   if (p.content != null) cur.content = String(p.content).substring(0, 45000);
-  if (p.content != null || p.title != null) {
-    cur.keywords = computeKeywords_((cur.title || '') + ' ' + (cur.content || ''));
-  }
   if (p.issuer != null) cur.issuer = String(p.issuer).trim();
   if (p.issuerLevel != null) cur.issuerLevel = String(p.issuerLevel).trim();
   if (p.status != null) cur.status = String(p.status).trim();
   if (p.security != null) cur.security = String(p.security).trim();
   if (p.urgency != null) cur.urgency = String(p.urgency).trim();
+
+  // Nội dung/tiêu đề/đơn vị thay đổi -> tính lại key phrases + hồ sơ phân tích để lưu tái sử dụng.
+  if (p.content != null || p.title != null || p.issuer != null) {
+    analyzeAndAttach_(cur);
+  }
 
   // Đánh dấu đã sửa tay (bảo vệ metadata) NHƯNG giữ nguyên ocrStatus để vẫn tiếp tục OCR nội dung.
   cur.edited = true;
