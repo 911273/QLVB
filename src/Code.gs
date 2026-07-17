@@ -97,7 +97,7 @@ var METHOD_PERM = {
   getStatus: null, changePassword: null, logout: null,
   search: 'view', getDetail: 'view', getStats: 'view', getUploadInfo: 'view', findDuplicates: 'view',
   exportCsv: 'view', getRelated: 'view',
-  updateDoc: 'edit', reOcr: 'edit', deleteDoc: 'delete',
+  updateDoc: 'edit', updateDocsBatch: 'edit', reOcr: 'edit', deleteDoc: 'delete',
   listTrash: 'delete', restoreDoc: 'delete', purgeDoc: 'delete', emptyTrash: 'delete',
   scan: 'scan', ocrQueueRun: 'scan', setOcrAuto: 'scan', setOcrLimit: 'scan', setAutoScan: 'scan',
   uploadFile: 'scan',
@@ -110,7 +110,7 @@ var METHOD_PERM = {
 
 // Các thao tác cần ghi nhật ký hoạt động.
 var AUDIT_METHODS = {
-  updateDoc: 1, deleteDoc: 1, restoreDoc: 1, purgeDoc: 1, emptyTrash: 1, reOcr: 1, scan: 1,
+  updateDoc: 1, updateDocsBatch: 1, deleteDoc: 1, restoreDoc: 1, purgeDoc: 1, emptyTrash: 1, reOcr: 1, scan: 1,
   uploadFile: 1, saveDocTypes: 1, saveIssuers: 1, setVisionKey: 1, changePassword: 1,
   saveAccount: 1, deleteAccount: 1, resetPassword: 1, initialize: 1,
   setAutoScan: 1, setOcrAuto: 1, setOcrLimit: 1, setStorageFolder: 1
@@ -158,6 +158,7 @@ function routeMethod_(method, payload, acc) {
     case 'findDuplicates': return findDuplicates();
     case 'getUploadInfo': return apiGetUploadInfo();
     case 'updateDoc':    return updateDocManual(payload);
+    case 'updateDocsBatch': return updateDocsBatch_(payload.fileIds, payload.fields);
     case 'reOcr':        return reOcrDoc(payload.fileId);
     case 'deleteDoc':    return deleteDocToTrash_(payload.fileId, acc.email);
     case 'listTrash':    return listTrash_();

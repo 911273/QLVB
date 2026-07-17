@@ -18,7 +18,7 @@ function call(method, payload) {
 }
 
 var TYPE_ICONS = {}; // code -> short label
-var STATE = { status: null, docTypes: [], issuers: [], issuerLevels: [], me: null };
+var STATE = { status: null, docTypes: [], issuers: [], issuerLevels: [], me: null, viewList: [], selected: {} };
 
 /* ============ Tiện ích UI ============ */
 function $(sel, root) { return (root || document).querySelector(sel); }
@@ -555,15 +555,20 @@ function renderResults(sel, res, keyword) {
   if (!res) { res = { items: [], total: 0, page: 1, totalPages: 1 }; }
   if (!res.items || !res.items.length) {
     STATE.viewList = [];
+    STATE.selected = {};
     box.innerHTML = '<div class="empty">Không có văn bản nào.<br><span class="muted">Hãy tải văn bản lên folder Drive rồi vào tab "Quét &amp; Cập nhật".</span></div>';
     return;
   }
   box.innerHTML = '';
   // Lưu thứ tự fileId đang hiển thị để điều hướng "sửa liên tục".
   STATE.viewList = res.items.map(function (d) { return d.fileId; });
+  STATE.selected = {}; // đặt lại lựa chọn mỗi lần render
+  var admin = isAdmin();
+  if (admin) box.appendChild(buildBatchBar_());
   var terms = (keyword || '').replace(/"/g, ' ').toLowerCase().split(/\s+/).filter(Boolean);
   res.items.forEach(function (d) {
     var item = el('div', 'doc-item');
+    if (admin) item.appendChild(buildDocCheck_(d.fileId));
     var badge = el('div', 'doc-badge', esc(d.docTypeCode || '?'));
     var main = el('div', 'doc-main');
     main.innerHTML =
@@ -964,6 +969,124 @@ function saveEdit(fileId) {
     loadStats();
   });
 }
+
+/* ============ Áp dụng hàng loạt (chọn nhiều văn bản, đặt trường chung 1 lần) ============ */
+// Thanh chọn phía trên danh sách (chỉ quản trị viên).
+function buildBatchBar_() {
+  var bar = el('div', 'batch-bar');
+  bar.setAttribute('style', 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 10px;padding:8px 10px;border:1px dashed var(--border,#ccc);border-radius:8px');
+  bar.innerHTML =
+    '<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin:0">' +
+      '<input type="checkbox" id="selAll"> Chọn tất cả trên trang' +
+    '</label>' +
+    '<button class="btn btn-primary" id="btnApplyBatch" disabled>✎ Áp dụng hàng loạt</button>' +
+    '<span class="muted" id="selCount">Chưa chọn văn bản nào</span>';
+  bar.querySelector('#selAll').addEventListener('change', function () { selectAllInView_(this.checked); });
+  bar.querySelector('#btnApplyBatch').addEventListener('click', openBatchEdit_);
+  return bar;
+}
+// Ô tick cho từng văn bản.
+function buildDocCheck_(fileId) {
+  var wrap = el('label', 'doc-check');
+  wrap.setAttribute('style', 'display:flex;align-items:center;padding:0 6px 0 2px;cursor:pointer');
+  var cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.setAttribute('data-sel', fileId);
+  cb.addEventListener('change', function () { toggleSel_(fileId, cb.checked); });
+  wrap.appendChild(cb);
+  return wrap;
+}
+function selectedIds_() { return Object.keys(STATE.selected || {}); }
+function toggleSel_(fileId, on) {
+  STATE.selected = STATE.selected || {};
+  if (on) STATE.selected[fileId] = true; else delete STATE.selected[fileId];
+  updateBatchBar_();
+}
+function selectAllInView_(on) {
+  STATE.selected = {};
+  if (on) (STATE.viewList || []).forEach(function (id) { STATE.selected[id] = true; });
+  $all('input[data-sel]').forEach(function (cb) { cb.checked = on; });
+  updateBatchBar_();
+}
+// Cập nhật nhãn số lượng + trạng thái nút + ô "chọn tất cả".
+function updateBatchBar_() {
+  var n = selectedIds_().length;
+  var cnt = $('#selCount'); if (cnt) cnt.textContent = n ? ('Đã chọn ' + n + ' văn bản') : 'Chưa chọn văn bản nào';
+  var btn = $('#btnApplyBatch'); if (btn) btn.disabled = !n;
+  var all = $('#selAll');
+  if (all) { var total = (STATE.viewList || []).length; all.checked = total > 0 && n >= total; }
+}
+
+// Mở form đặt trường chung cho các văn bản đã chọn.
+function openBatchEdit_() {
+  var ids = selectedIds_();
+  if (!ids.length) { toast('Chưa chọn văn bản nào.', 'err'); return; }
+
+  var typeOpts = '<option value="">— Không đổi —</option>' +
+    (STATE.docTypes || []).map(function (t) { return '<option value="' + esc(t.code) + '">' + esc(t.name) + '</option>'; }).join('') +
+    '<option value="KHAC">Khác</option>';
+  var levelOpts = '<option value="">— Không đổi —</option>' +
+    (STATE.issuerLevels || []).map(function (lv) { return '<option value="' + esc(lv) + '">' + esc(lv) + '</option>'; }).join('');
+  var noChange_ = function (options) {
+    return '<option value="">— Không đổi —</option>' +
+      (options || []).map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('');
+  };
+  var issuerList = (STATE.issuers || []).map(function (it) { return '<option value="' + esc(it.name) + '">'; }).join('');
+
+  var html =
+    '<h2>Áp dụng hàng loạt</h2>' +
+    '<p class="muted">Đặt cùng lúc các trường bên dưới cho <b>' + ids.length + '</b> văn bản đã chọn. ' +
+      'Để trống ô nào thì trường đó <b>giữ nguyên</b> ở mọi văn bản.</p>' +
+    '<datalist id="issuerListBatch">' + issuerList + '</datalist>' +
+    '<div class="edit-grid">' +
+      '<label>Loại văn bản<select id="bType" class="input">' + typeOpts + '</select></label>' +
+      '<label>Đơn vị ban hành<input id="bIssuer" class="input" list="issuerListBatch" placeholder="— Không đổi —"></label>' +
+      '<label>Cấp ban hành<select id="bLevel" class="input">' + levelOpts + '</select></label>' +
+      '<label>Trạng thái xử lý<select id="bStatus" class="input">' + noChange_(STATE.statusOptions) + '</select></label>' +
+      '<label>Độ mật<select id="bSecurity" class="input">' + noChange_(STATE.securityOptions) + '</select></label>' +
+      '<label>Độ khẩn<select id="bUrgency" class="input">' + noChange_(STATE.urgencyOptions) + '</select></label>' +
+    '</div>' +
+    '<div class="form-row" style="margin-top:14px">' +
+      '<button class="btn btn-primary" id="btnBatchApply">Áp dụng cho ' + ids.length + ' văn bản</button>' +
+      '<button class="btn" id="btnBatchCancel">Huỷ</button>' +
+    '</div>' +
+    '<p class="muted" style="margin-top:8px">Các văn bản được đánh dấu <b>"Đã sửa tay"</b> nên sẽ <b>không bị ghi đè</b> khi quét lại. ' +
+      'Đổi <b>đơn vị ban hành</b> sẽ tính lại key phrases &amp; hồ sơ phân tích của từng văn bản.</p>';
+  $('#modalContent').innerHTML = html;
+  setModalWide_(false);
+  $('#modal').classList.remove('hidden');
+  // Chọn đơn vị có sẵn -> gợi ý cấp ban hành tương ứng.
+  $('#bIssuer').addEventListener('change', function () {
+    var name = this.value.trim();
+    var match = (STATE.issuers || []).filter(function (it) { return it.name === name; })[0];
+    if (match && match.level) $('#bLevel').value = match.level;
+  });
+  $('#btnBatchCancel').addEventListener('click', closeModal);
+  $('#btnBatchApply').addEventListener('click', function () { doBatchApply_(ids); });
+}
+
+function doBatchApply_(ids) {
+  var fields = {
+    docTypeCode: $('#bType').value,
+    issuer: $('#bIssuer').value.trim(),
+    issuerLevel: $('#bLevel').value,
+    status: $('#bStatus').value,
+    security: $('#bSecurity').value,
+    urgency: $('#bUrgency').value
+  };
+  var chosen = ['docTypeCode', 'issuer', 'issuerLevel', 'status', 'security', 'urgency']
+    .some(function (k) { return fields[k] !== ''; });
+  if (!chosen) { toast('Hãy chọn ít nhất một trường để áp dụng.', 'err'); return; }
+  showLoading(true, 'Đang áp dụng cho ' + ids.length + ' văn bản...');
+  call('updateDocsBatch', { fileIds: ids, fields: fields }).then(function (r) {
+    showLoading(false);
+    closeModal();
+    toast('Đã cập nhật ' + (r.updated || 0) + '/' + (r.requested || ids.length) + ' văn bản.', 'ok');
+    refreshResults();
+    loadStats();
+  }).catch(function (err) { showLoading(false); toast('Lỗi áp dụng: ' + (err.message || err), 'err'); });
+}
+
 function row(k, v) { return '<div class="k">' + k + '</div><div>' + v + '</div>'; }
 function closeModal() { $('#modal').classList.add('hidden'); setModalWide_(false); }
 
