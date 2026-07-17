@@ -1,125 +1,81 @@
 # CURRENT TASK
 
-# Feature
+## Feature
 
-Database Storage Security
+Administrator Database Folder Settings
 
 ---
 
 ## WHY
 
-Hiện tại người dùng có thể biết hoặc truy cập trực tiếp vào Google Drive chứa cơ sở dữ liệu.
+Hiện tại vị trí thư mục Google Drive của cơ sở dữ liệu được cấu hình cố định.
 
-Điều này không đáp ứng yêu cầu bảo mật lâu dài.
+Khi cần chuyển sang thư mục khác phải sửa source code.
 
-Hệ thống cần tách hoàn toàn người dùng khỏi vị trí lưu trữ dữ liệu.
-
----
-
-## BUSINESS GOAL
-
-Đảm bảo chỉ tài khoản Quản trị viên (Administrator) mới được phép:
-
-- Xem vị trí Google Drive Database
-- Thay đổi vị trí Google Drive Database
-- Xem thông tin Folder ID
-- Xem thông tin cấu hình lưu trữ
-
-Người dùng thông thường không được biết hoặc truy cập các thông tin trên.
+Mục tiêu là cho phép Administrator thay đổi vị trí thư mục mà không cần chỉnh sửa mã nguồn.
 
 ---
 
-## FUNCTIONAL REQUIREMENTS
+## Business Requirements
 
-Thiết kế và triển khai cơ chế quản lý vị trí Database.
+Chỉ tài khoản Administrator được phép:
 
-Yêu cầu:
+- Xem cấu hình thư mục cơ sở dữ liệu.
+- Thay đổi thư mục cơ sở dữ liệu.
+- Lưu cấu hình mới.
 
-1.
+Người dùng thông thường:
 
-Chỉ Administrator mới được xem:
-
-- Database Folder
-- Database Folder ID
-- Database Configuration
-
-2.
-
-Cho phép Administrator thay đổi:
-
-- Database Folder
-
-mà không cần sửa source code.
-
-3.
-
-Khi thay đổi Folder:
-
-Hệ thống phải cập nhật cấu hình.
-
-4.
-
-Không làm mất dữ liệu.
-
-5.
-
-Không ảnh hưởng OCR.
-
-6.
-
-Không ảnh hưởng Search.
-
-7.
-
-Không ảnh hưởng Scanner.
+- Không nhìn thấy chức năng này.
+- Không được biết Folder ID.
+- Không được biết URL Google Drive.
 
 ---
 
-## NON-FUNCTIONAL REQUIREMENTS
+## Functional Requirements
 
-Không hardcode Folder ID.
+Thêm mục "Database Storage" trong trang quản trị.
 
-Không yêu cầu sửa source để đổi Folder.
+Administrator có thể:
 
-Có khả năng mở rộng nhiều Storage Provider trong tương lai.
+- Dán URL Google Drive Folder.
+- Hoặc nhập trực tiếp Folder ID.
 
-Ưu tiên dùng cơ chế Configuration thay vì Constant.
+Hệ thống phải:
 
-Thiết kế dễ bảo trì.
+- Tự trích xuất Folder ID nếu người dùng nhập URL.
+- Kiểm tra Folder có tồn tại.
+- Kiểm tra ứng dụng có quyền truy cập Folder.
+- Lưu cấu hình khi hợp lệ.
+- Hiển thị thông báo lỗi khi không hợp lệ.
 
----
+Sau khi lưu:
 
-## SECURITY REQUIREMENTS
+Toàn bộ chức năng Scanner, OCR, Search và Storage phải sử dụng Folder mới.
 
-Không hiển thị Folder ID cho User.
-
-Không hiển thị Google Drive URL cho User.
-
-Không cho phép User sửa Database Location.
-
-Kiểm tra quyền trước mọi thao tác thay đổi cấu hình.
-
----
-
-## DESIGN REQUIREMENTS
-
-Claude phải:
-
-- Phân tích kiến trúc hiện tại.
-
-- Đề xuất thiết kế tối ưu.
-
-- Chỉ sửa những module cần thiết.
-
-- Hạn chế thay đổi API.
-
-- Không tạo Technical Debt.
-
-Nếu cần thay đổi kiến trúc, giải thích lý do trước khi triển khai.
+Không cần khởi động lại ứng dụng.
 
 ---
 
-## FILES ALLOWED
+## Validation
+
+Chấp nhận:
+
+https://drive.google.com/drive/folders/...
+
+hoặc
+
+Folder ID.
+
+Không chấp nhận:
+
+- URL không hợp lệ.
+- Folder không tồn tại.
+- Folder không có quyền truy cập.
+
+---
+
+## Files Allowed
 
 Config.gs
 
@@ -127,11 +83,11 @@ Storage.gs
 
 Code.gs
 
-(JavaScript.html nếu thật sự cần)
+JavaScript.html (Settings)
 
 ---
 
-## FILES FORBIDDEN
+## Files Forbidden
 
 Scanner.gs
 
@@ -139,26 +95,16 @@ Search.gs
 
 Classifier.gs
 
-OCR.gs
-
 Stylesheet.html
-
-Index.html (trừ khi bắt buộc)
-
-appsscript.json
 
 ---
 
-## SUCCESS CRITERIA
+## Success Criteria
 
-✓ Chỉ Administrator được quản lý Database Folder.
+✓ Administrator có thể đổi Database Folder.
 
-✓ Folder Database có thể thay đổi từ giao diện quản trị.
+✓ Không cần sửa source code.
 
-✓ Không cần sửa source code khi đổi Folder.
+✓ Người dùng thường không nhìn thấy chức năng này.
 
-✓ Không ảnh hưởng dữ liệu hiện có.
-
-✓ Không ảnh hưởng các chức năng khác.
-
-✓ Thiết kế có khả năng mở rộng.
+✓ Hệ thống tiếp tục hoạt động với Folder mới.
