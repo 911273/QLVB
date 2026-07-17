@@ -283,6 +283,7 @@ function loadStatus() {
 }
 
 function can(perm) { return !!(STATE.me && STATE.me.perms && STATE.me.perms[perm]); }
+function isAdmin() { return !!(STATE.me && STATE.me.role === 'admin'); }
 // Tài khoản 'free' không hiển thị trạng thái xử lý / độ mật / độ khẩn.
 function showWorkflow() { return !(STATE.me && STATE.me.role === 'free'); }
 
@@ -320,6 +321,7 @@ function applyAcl() {
   toggleEl('#cardAudit', can('accounts'));
   toggleEl('#cardTrash', can('delete'));
   toggleEl('#btnInit', can('config'));
+  ensureStorageCard_(); // Thẻ "Database Storage" chỉ dành cho quản trị viên.
   // Tài khoản free: ẩn ô lọc trạng thái & độ mật.
   toggleEl('#fStatus', showWorkflow());
   toggleEl('#fSecurity', showWorkflow());
@@ -1094,6 +1096,78 @@ function renderSysInfo() {
     row('Tự động quét', st.autoScan ? '<span class="tag ok">Đang bật</span>' : '<span class="tag skip">Tắt</span>') +
     row('Động cơ OCR', st.visionEnabled ? '<span class="tag ok">Vision (nâng cao)</span>' : '<span class="tag skip">Drive OCR (cơ bản)</span>') +
     row('Quét gần nhất', fmtDateTime(st.lastScan));
+}
+
+/* ---- Database Storage (chỉ quản trị viên) ---- */
+// Tạo thẻ "Database Storage" động (ADR-002: không nhét logic vào HTML tĩnh) và nạp cấu hình.
+function ensureStorageCard_() {
+  var card = $('#cardStorage');
+  if (!isAdmin()) { if (card) card.style.display = 'none'; return; }
+  if (!card) {
+    var panel = $('#tab-settings');
+    if (!panel) return;
+    card = el('div');
+    card.className = 'card';
+    card.id = 'cardStorage';
+    card.innerHTML =
+      '<h3>Database Storage — Thư mục cơ sở dữ liệu</h3>' +
+      '<p class="muted">Đổi thư mục Google Drive dùng làm kho cơ sở dữ liệu. Dán <b>URL thư mục</b> hoặc <b>Folder ID</b>. Sau khi lưu, toàn hệ thống dùng thư mục mới ngay, không cần khởi động lại. Dữ liệu ở thư mục cũ được giữ nguyên.</p>' +
+      '<div id="storageCurrent" class="muted" style="margin-bottom:8px"></div>' +
+      '<div class="form-row">' +
+        '<input type="text" id="storageInput" class="input grow" placeholder="Dán URL thư mục Drive hoặc Folder ID" autocomplete="off">' +
+        '<button class="btn btn-primary" id="btnSaveStorage">Lưu thư mục</button>' +
+      '</div>' +
+      '<div id="storageMsg" style="margin-top:8px"></div>';
+    // Chèn ngay sau thẻ "Thông tin hệ thống" (thẻ đầu tiên của trang cài đặt).
+    var first = panel.querySelector('.card');
+    if (first && first.nextSibling) panel.insertBefore(card, first.nextSibling);
+    else panel.appendChild(card);
+    $('#btnSaveStorage').addEventListener('click', saveStorageFolder);
+  }
+  card.style.display = '';
+  loadStorageConfig();
+}
+
+function loadStorageConfig() {
+  call('getStorageConfig').then(function (r) {
+    var box = $('#storageCurrent');
+    if (!box) return;
+    if (r && r.folder) {
+      box.innerHTML = 'Thư mục hiện tại: <a href="' + esc(r.folder.url) + '" target="_blank"><b>' + esc(r.folder.name) + '</b></a>' +
+        (r.database ? '<br>Cơ sở dữ liệu: <a href="' + esc(r.database.url) + '" target="_blank">' + esc(r.database.name) + '</a>' : '');
+    } else {
+      box.innerHTML = '<i>Chưa cấu hình thư mục.</i>';
+    }
+  }).catch(function (err) {
+    var box = $('#storageCurrent'); if (box) box.textContent = 'Lỗi tải cấu hình: ' + (err.message || err);
+  });
+}
+
+function saveStorageFolder() {
+  var inp = $('#storageInput');
+  var val = (inp ? inp.value : '').trim();
+  var msg = $('#storageMsg');
+  function setMsg(text, ok) {
+    if (!msg) return;
+    msg.textContent = text;
+    msg.style.color = ok ? '#1e7e34' : '#c0392b';
+  }
+  if (!val) { setMsg('Hãy nhập URL thư mục hoặc Folder ID.', false); return; }
+  showLoading(true, 'Đang kiểm tra thư mục...');
+  call('setStorageFolder', { input: val }).then(function (r) {
+    showLoading(false);
+    if (r && r.ok) {
+      setMsg('Đã đổi thư mục cơ sở dữ liệu.', true);
+      if (inp) inp.value = '';
+      toast('Đã chuyển sang thư mục: ' + (r.folder ? r.folder.name : ''), 'ok');
+      loadStatus(); // nạp lại toàn bộ theo thư mục mới
+    } else {
+      setMsg((r && r.error) || 'Thư mục không hợp lệ.', false);
+    }
+  }).catch(function (err) {
+    showLoading(false);
+    setMsg('Lỗi: ' + (err.message || err), false);
+  });
 }
 
 function renderTypesTable() {

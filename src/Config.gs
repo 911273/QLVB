@@ -19,6 +19,26 @@ var DEFAULT_DB_SPREADSHEET_NAME = 'QLVB-EPU - Cơ sở dữ liệu văn bản';
 var DB_SHEET_DOCS = 'VanBan';    // Sheet chứa danh mục văn bản
 var DB_SHEET_LOG = 'NhatKy';     // Sheet nhật ký quét
 
+/**
+ * Trích Folder ID từ URL Google Drive hoặc chuỗi ID thô.
+ * Hỗ trợ: .../folders/<id>, ...?id=<id>, .../open?id=<id>, hoặc ID thô.
+ * Trả về ID (chuỗi) nếu nhận ra, hoặc null nếu không hợp lệ.
+ * Hàm thuần (không phụ thuộc dịch vụ) để dễ kiểm thử.
+ */
+function parseFolderId_(input) {
+  var s = String(input || '').trim();
+  if (!s) return null;
+  // URL dạng /folders/<id>
+  var m = s.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (m) return m[1];
+  // URL dạng ?id=<id> hoặc &id=<id> (open?id=..., uc?id=...)
+  m = s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (m) return m[1];
+  // ID thô (không phải URL): chuỗi ký tự hợp lệ của Drive.
+  if (s.indexOf('/') === -1 && /^[a-zA-Z0-9_-]{10,}$/.test(s)) return s;
+  return null;
+}
+
 // Ngôn ngữ OCR (Google OCR). 'vi' = Tiếng Việt.
 var OCR_LANGUAGE = 'vi';
 

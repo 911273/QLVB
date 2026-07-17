@@ -101,6 +101,108 @@ function getOrCreateDatabase() {
   return ss;
 }
 
+/* ===================== CẤU HÌNH THƯ MỤC LƯU TRỮ (chỉ Admin) ===================== */
+/*
+ * Theo ADR-012: chỉ tầng Storage được đọc/ghi cấu hình vị trí lưu trữ.
+ * Scanner/Search/OCR không biết Folder ID, chỉ dùng getOrCreateRootFolder()/sheet của Storage.
+ */
+
+/**
+ * Kiểm tra một Folder ID: có tồn tại & ứng dụng có quyền truy cập không.
+ * Trả { ok:true, id, name, url } hoặc { ok:false, error }.
+ */
+function validateFolder_(id) {
+  if (!id) return { ok: false, error: 'Thiếu Folder ID.' };
+  try {
+    var folder = DriveApp.getFolderById(id);
+    var name = folder.getName(); // chạm dữ liệu để chắc chắn có quyền đọc
+    return { ok: true, id: folder.getId(), name: name, url: folder.getUrl() };
+  } catch (e) {
+    return { ok: false, error: 'Không tìm thấy thư mục hoặc ứng dụng không có quyền truy cập.' };
+  }
+}
+
+/**
+ * Cấu hình lưu trữ hiện tại (cho màn hình quản trị): thư mục gốc + spreadsheet DB.
+ */
+function getStorageConfig_() {
+  var props = PropertiesService.getScriptProperties();
+  var out = { configured: false, folder: null, database: null };
+  var id = props.getProperty(PROP_ROOT_FOLDER_ID);
+  if (id) {
+    try {
+      var f = DriveApp.getFolderById(id);
+      out.configured = true;
+      out.folder = { id: f.getId(), name: f.getName(), url: f.getUrl() };
+    } catch (e) { out.folder = null; }
+  }
+  var dbId = props.getProperty(PROP_DB_SPREADSHEET_ID);
+  if (dbId) {
+    try {
+      var db = DriveApp.getFileById(dbId);
+      out.database = { id: dbId, name: db.getName(), url: db.getUrl() };
+    } catch (e) { out.database = null; }
+  }
+  return out;
+}
+
+/**
+ * Đổi thư mục lưu trữ (Database Folder) sang folder do Admin cung cấp (URL hoặc ID).
+ *  - Trích ID -> kiểm tra tồn tại + quyền truy cập.
+ *  - Trỏ PROP_ROOT_FOLDER_ID sang folder mới.
+ *  - Rebind DB: dùng lại spreadsheet DB theo tên chuẩn nếu đã có trong folder mới,
+ *    ngược lại tạo DB mới trong folder đó. KHÔNG di chuyển dữ liệu cũ (folder cũ giữ nguyên).
+ *  - Xoá cache + cờ migration để áp dụng ngay, không cần khởi động lại.
+ * Trả { ok:true, folder, database } hoặc { ok:false, error }.
+ */
+function setStorageFolder_(input) {
+  var id = parseFolderId_(input);
+  if (!id) return { ok: false, error: 'URL hoặc Folder ID không hợp lệ.' };
+  var v = validateFolder_(id);
+  if (!v.ok) return { ok: false, error: v.error };
+
+  var props = PropertiesService.getScriptProperties();
+  var folder = DriveApp.getFolderById(v.id);
+
+  // Rebind DB spreadsheet: tìm trong folder mới theo tên chuẩn; nếu chưa có thì tạo mới.
+  var dbId = '';
+  var it = folder.getFilesByName(DEFAULT_DB_SPREADSHEET_NAME);
+  while (it.hasNext()) {
+    var file = it.next();
+    if (file.getMimeType() === MimeType.GOOGLE_SHEETS) { dbId = file.getId(); break; }
+  }
+  if (!dbId) {
+    var ssNew = SpreadsheetApp.create(DEFAULT_DB_SPREADSHEET_NAME);
+    dbId = ssNew.getId();
+    try {
+      var f2 = DriveApp.getFileById(dbId);
+      folder.addFile(f2);
+      DriveApp.getRootFolder().removeFile(f2);
+    } catch (e) { /* bỏ qua nếu không di chuyển được */ }
+  }
+
+  // Cập nhật cấu hình.
+  props.setProperty(PROP_ROOT_FOLDER_ID, v.id);
+  props.setProperty(PROP_DB_SPREADSHEET_ID, dbId);
+  // Cho phép các migration chạy lại trên DB mới (nếu là DB có sẵn của folder khác).
+  props.deleteProperty('DATE_FMT_MIGRATED_V1');
+  props.deleteProperty('MANUAL_FLAG_MIGRATED_V1');
+  props.deleteProperty('KEYWORDS_MIGRATED_V2');
+  // Số liệu quét/trùng lặp cũ không còn đúng với folder mới.
+  props.deleteProperty(PROP_LAST_SCAN);
+  props.deleteProperty(PROP_DUP_COUNT);
+
+  // Rebind trong execution hiện tại -> áp dụng ngay.
+  _dbCache = null;
+  var ss = getOrCreateDatabase(); // mở DB mới + ensureSheets_ + migrate
+
+  return {
+    ok: true,
+    folder: { id: folder.getId(), name: folder.getName(), url: folder.getUrl() },
+    database: { id: dbId, name: ss.getName(), url: DriveApp.getFileById(dbId).getUrl() }
+  };
+}
+
 // Chuyển cột "Ngày ban hành" từ chữ 'yyyy-MM-dd' sang Date thật (chạy 1 lần).
 function migrateIssuedDates_(ss) {
   var props = PropertiesService.getScriptProperties();

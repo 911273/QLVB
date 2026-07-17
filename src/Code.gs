@@ -103,6 +103,7 @@ var METHOD_PERM = {
   uploadFile: 'scan',
   saveDocTypes: 'config', resetDocTypes: 'config', saveIssuers: 'config', resetIssuers: 'config',
   setVisionKey: 'config', testVision: 'config', initialize: 'config', logoInfo: 'config',
+  getStorageConfig: 'config', setStorageFolder: 'config',
   listAccounts: 'accounts', saveAccount: 'accounts', deleteAccount: 'accounts', resetPassword: 'accounts',
   listAudit: 'accounts'
 };
@@ -112,7 +113,7 @@ var AUDIT_METHODS = {
   updateDoc: 1, deleteDoc: 1, restoreDoc: 1, purgeDoc: 1, emptyTrash: 1, reOcr: 1, scan: 1,
   uploadFile: 1, saveDocTypes: 1, saveIssuers: 1, setVisionKey: 1, changePassword: 1,
   saveAccount: 1, deleteAccount: 1, resetPassword: 1, initialize: 1,
-  setAutoScan: 1, setOcrAuto: 1, setOcrLimit: 1
+  setAutoScan: 1, setOcrAuto: 1, setOcrLimit: 1, setStorageFolder: 1
 };
 
 /**
@@ -176,6 +177,8 @@ function routeMethod_(method, payload, acc) {
     case 'testVision':   return apiTestVision();
     case 'initialize':   return apiInitialize(acc);
     case 'logoInfo':     return getLogoInfo_();
+    case 'getStorageConfig': return apiGetStorageConfig(acc);
+    case 'setStorageFolder': return apiSetStorageFolder(acc, payload.input);
     case 'listAccounts': return listAccounts_();
     case 'saveAccount':  return saveAccount_(payload);
     case 'deleteAccount': return deleteAccount_(payload.email, acc.email);
@@ -427,6 +430,22 @@ function apiSetVisionKey(key) {
  */
 function apiTestVision() {
   return testVisionKey();
+}
+
+/**
+ * (Admin) Xem cấu hình thư mục lưu trữ hiện tại. Chỉ quản trị viên (ADR-011).
+ */
+function apiGetStorageConfig(acc) {
+  if (!acc || acc.role !== 'admin') throw new Error('Chỉ quản trị viên được xem cấu hình lưu trữ.');
+  return getStorageConfig_();
+}
+
+/**
+ * (Admin) Đổi thư mục lưu trữ (Database Folder) theo URL hoặc Folder ID. Chỉ quản trị viên.
+ */
+function apiSetStorageFolder(acc, input) {
+  if (!acc || acc.role !== 'admin') throw new Error('Chỉ quản trị viên được đổi thư mục lưu trữ.');
+  return setStorageFolder_(input);
 }
 
 /**
