@@ -113,6 +113,7 @@
           <select id="listType" class="input"></select>
           <input type="text" id="listKeyword" class="input" placeholder="Lọc nhanh theo từ khoá...">
           <button class="btn" id="btnListReload">Tải lại</button>
+          <button class="btn hidden" id="btnBulkEditList" title="Sửa thông tin nhiều văn bản liên tục">✎ Sửa liên tục</button>
         </div>
         <div id="listResults" class="results"></div>
         <div id="listPager" class="pager"></div>
@@ -127,6 +128,7 @@
             <button class="btn only-mobile" id="btnToggleFilters">Bộ lọc ▾</button>
             <button class="btn hide-mobile" id="btnSearchClear">Xoá lọc</button>
             <button class="btn hide-mobile" id="btnExport" title="Xuất danh mục theo bộ lọc ra Excel/CSV">⭳ Xuất Excel</button>
+            <button class="btn hide-mobile hidden" id="btnBulkEdit" title="Sửa thông tin nhiều văn bản liên tục">✎ Sửa liên tục</button>
           </div>
           <div id="advFilters">
           <div class="form-row">

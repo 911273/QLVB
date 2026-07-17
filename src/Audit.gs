@@ -54,6 +54,7 @@ function auditLog_(email, method, detail) {
 // Tạo mô tả ngắn cho log từ payload của phương thức.
 function auditDetail_(method, payload) {
   payload = payload || {};
+  if (method === 'updateDocsBatch') return (payload.fileIds ? payload.fileIds.length : 0) + ' văn bản';
   if (payload.fileId) return 'fileId: ' + payload.fileId;
   if (payload.email) return payload.email;
   if (method === 'scan') return payload.force ? 'quét lại toàn bộ' : 'quét thường';

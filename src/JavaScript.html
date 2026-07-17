@@ -18,7 +18,7 @@ function call(method, payload) {
 }
 
 var TYPE_ICONS = {}; // code -> short label
-var STATE = { status: null, docTypes: [], issuers: [], issuerLevels: [], me: null };
+var STATE = { status: null, docTypes: [], issuers: [], issuerLevels: [], me: null, viewList: [], selected: {} };
 
 /* ============ Tiện ích UI ============ */
 function $(sel, root) { return (root || document).querySelector(sel); }
@@ -222,6 +222,8 @@ function bindActions() {
   $('#btnScanForce').addEventListener('click', function () { doScan(true); });
   $('#btnUpload').addEventListener('click', doUpload);
   $('#btnListReload').addEventListener('click', function () { loadList(1); });
+  var bbe = $('#btnBulkEdit'); if (bbe) bbe.addEventListener('click', startBulkEdit);
+  var bbel = $('#btnBulkEditList'); if (bbel) bbel.addEventListener('click', startBulkEdit);
   $('#listKeyword').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadList(1); });
   $('#listType').addEventListener('change', function () { loadList(1); });
   $('#btnAutoOn').addEventListener('click', function () { setAutoScan(true); });
@@ -321,6 +323,9 @@ function applyAcl() {
   toggleEl('#cardAudit', can('accounts'));
   toggleEl('#cardTrash', can('delete'));
   toggleEl('#btnInit', can('config'));
+  // "Sửa liên tục" chỉ dành cho quản trị viên.
+  toggleEl('#btnBulkEdit', isAdmin());
+  toggleEl('#btnBulkEditList', isAdmin());
   ensureStorageCard_(); // Thẻ "Database Storage" chỉ dành cho quản trị viên.
   // Tài khoản free: ẩn ô lọc trạng thái & độ mật.
   toggleEl('#fStatus', showWorkflow());
@@ -549,13 +554,21 @@ function renderResults(sel, res, keyword) {
   var box = $(sel);
   if (!res) { res = { items: [], total: 0, page: 1, totalPages: 1 }; }
   if (!res.items || !res.items.length) {
+    STATE.viewList = [];
+    STATE.selected = {};
     box.innerHTML = '<div class="empty">Không có văn bản nào.<br><span class="muted">Hãy tải văn bản lên folder Drive rồi vào tab "Quét &amp; Cập nhật".</span></div>';
     return;
   }
   box.innerHTML = '';
+  // Lưu thứ tự fileId đang hiển thị để điều hướng "sửa liên tục".
+  STATE.viewList = res.items.map(function (d) { return d.fileId; });
+  STATE.selected = {}; // đặt lại lựa chọn mỗi lần render
+  var admin = isAdmin();
+  if (admin) box.appendChild(buildBatchBar_());
   var terms = (keyword || '').replace(/"/g, ' ').toLowerCase().split(/\s+/).filter(Boolean);
   res.items.forEach(function (d) {
     var item = el('div', 'doc-item');
+    if (admin) item.appendChild(buildDocCheck_(d.fileId));
     var badge = el('div', 'doc-badge', esc(d.docTypeCode || '?'));
     var main = el('div', 'doc-main');
     main.innerHTML =
@@ -770,7 +783,60 @@ function optList_(options, sel) {
     return '<option value="' + esc(x) + '"' + (x === sel ? ' selected' : '') + '>' + esc(x) + '</option>';
   }).join('');
 }
-function openEditForm(d) {
+// Snapshot giá trị các ô trong form sửa để phát hiện thay đổi chưa lưu.
+var EDIT_FIELDS_ = ['edType', 'edNumber', 'edIssuer', 'edLevel', 'edStatus', 'edSecurity', 'edUrgency', 'edDate', 'edTitle', 'edContent'];
+var EDIT_SNAP_ = '';
+function editValues_() {
+  return EDIT_FIELDS_.map(function (id) { var e = $('#' + id); return e ? e.value : ''; }).join('');
+}
+function editDirty_() { return EDIT_SNAP_ !== '' && editValues_() !== EDIT_SNAP_; }
+// Cảnh báo nếu còn thay đổi chưa lưu trước khi rời văn bản.
+// Dùng confirm gốc (đồng bộ, không phá DOM) để nếu người dùng huỷ thì form đang sửa vẫn còn nguyên.
+function editGuard_(fn) {
+  if (editDirty_() && !window.confirm('Bạn có thay đổi chưa lưu. Rời văn bản này sẽ mất thay đổi. Tiếp tục?')) return;
+  fn();
+}
+
+/**
+ * Mở form sửa của 1 văn bản trong chuỗi "sửa liên tục" theo chỉ số.
+ * @param {{list: string[], index: number}} nav Ngữ cảnh điều hướng.
+ * @param {number} idx Chỉ số văn bản muốn mở.
+ */
+function bulkGoto_(nav, idx) {
+  if (idx < 0 || idx >= nav.list.length) { finishBulk_(); return; }
+  showLoading(true, 'Đang tải văn bản...');
+  call('getDetail', { fileId: nav.list[idx] }).then(function (dd) {
+    showLoading(false);
+    if (!dd) { toast('Không tải được văn bản.', 'err'); return; }
+    openEditForm(dd, { list: nav.list, index: idx });
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+// Kết thúc chuỗi sửa liên tục: đóng modal và làm mới danh sách/thống kê 1 lần.
+function finishBulk_() {
+  closeModal();
+  toast('Đã hoàn tất sửa liên tục.', 'ok');
+  refreshResults();
+  loadStats();
+}
+
+/**
+ * Bắt đầu sửa liên tục từ văn bản đầu tiên trong danh sách đang xem (chỉ quản trị viên).
+ */
+function startBulkEdit() {
+  if (!isAdmin()) { toast('Chức năng dành cho quản trị viên.', 'err'); return; }
+  var list = STATE.viewList || [];
+  if (!list.length) { toast('Chưa có văn bản nào trong danh sách để sửa.', 'err'); return; }
+  bulkGoto_({ list: list, index: 0 }, 0);
+}
+
+/**
+ * Mở form sửa thông tin văn bản.
+ * @param {Object} d Hồ sơ văn bản (từ getDetail).
+ * @param {{list: string[], index: number}=} nav Ngữ cảnh sửa liên tục; bỏ trống = sửa đơn lẻ.
+ */
+function openEditForm(d, nav) {
+  nav = nav || null;
   var typeOpts = (STATE.docTypes || []).map(function (t) {
     return '<option value="' + esc(t.code) + '"' + (t.code === d.docTypeCode ? ' selected' : '') + '>' + esc(t.name) + '</option>';
   }).join('');
@@ -801,7 +867,8 @@ function openEditForm(d) {
     '</div>' +
     '<div class="form-row" style="margin-top:14px">' +
       '<button class="btn btn-primary" id="btnSaveEdit">Lưu thay đổi</button>' +
-      '<button class="btn" id="btnCancelEdit">Huỷ</button>' +
+      (nav ? '<button class="btn btn-primary" id="btnSaveNext">Lưu &amp; Tiếp ▶</button>' : '') +
+      '<button class="btn" id="btnCancelEdit">' + (nav ? 'Đóng' : 'Huỷ') + '</button>' +
     '</div>' +
     '<p class="muted" style="margin-top:8px">Sau khi lưu, văn bản được đánh dấu <b>"Đã sửa tay"</b> và sẽ <b>không bị ghi đè</b> khi quét lại. Muốn OCR lại đè lên, mở chi tiết và bấm "OCR lại".</p>';
 
@@ -817,17 +884,47 @@ function openEditForm(d) {
     body = fields;
   }
 
+  var navBar = '';
+  if (nav) {
+    var last = nav.list.length - 1;
+    navBar =
+      '<div class="form-row" style="align-items:center;justify-content:space-between;margin-bottom:8px">' +
+        '<div class="form-row" style="margin:0">' +
+          '<button class="btn" id="btnEditPrev"' + (nav.index <= 0 ? ' disabled' : '') + '>◀ Trước</button>' +
+          '<button class="btn" id="btnEditNext"' + (nav.index >= last ? ' disabled' : '') + '>Sau ▶</button>' +
+        '</div>' +
+        '<span class="tag">Sửa liên tục — Văn bản ' + (nav.index + 1) + '/' + nav.list.length + '</span>' +
+      '</div>';
+  }
+
   var html =
-    '<h2>Sửa thông tin văn bản</h2>' +
+    '<h2>' + (nav ? 'Sửa liên tục — thông tin văn bản' : 'Sửa thông tin văn bản') + '</h2>' +
     '<p class="muted">Tên file: ' + esc(d.fileName) + '</p>' +
+    navBar +
     '<datalist id="issuerList">' + issuerList + '</datalist>' +
     body;
   $('#modalContent').innerHTML = html;
   setModalWide_(!!preview);
   $('#modal').classList.remove('hidden');
   initDateFields($('#modalContent'));
-  $('#btnCancelEdit').addEventListener('click', function () { openDetail(d.fileId); });
-  $('#btnSaveEdit').addEventListener('click', function () { saveEdit(d.fileId); });
+  EDIT_SNAP_ = editValues_();
+
+  if (nav) {
+    $('#btnCancelEdit').addEventListener('click', function () { editGuard_(finishBulk_); });
+    $('#btnSaveEdit').addEventListener('click', function () {
+      saveEditThen_(d.fileId, null); // lưu & ở lại văn bản hiện tại (không tải lại, tiết kiệm quota)
+    });
+    $('#btnSaveNext').addEventListener('click', function () {
+      saveEditThen_(d.fileId, function () { bulkGoto_(nav, nav.index + 1); }); // lưu & sang văn bản kế tiếp
+    });
+    var bp = $('#btnEditPrev');
+    if (bp) bp.addEventListener('click', function () { editGuard_(function () { bulkGoto_(nav, nav.index - 1); }); });
+    var bn = $('#btnEditNext');
+    if (bn) bn.addEventListener('click', function () { editGuard_(function () { bulkGoto_(nav, nav.index + 1); }); });
+  } else {
+    $('#btnCancelEdit').addEventListener('click', function () { openDetail(d.fileId); });
+    $('#btnSaveEdit').addEventListener('click', function () { saveEdit(d.fileId); });
+  }
   // Chọn đơn vị có sẵn -> tự điền cấp ban hành tương ứng.
   $('#edIssuer').addEventListener('change', function () {
     var name = this.value.trim();
@@ -836,8 +933,9 @@ function openEditForm(d) {
   });
 }
 
-function saveEdit(fileId) {
-  var payload = {
+// Thu thập payload sửa từ các ô trong form.
+function editPayload_(fileId) {
+  return {
     fileId: fileId,
     docTypeCode: $('#edType').value,
     docNumber: $('#edNumber').value.trim(),
@@ -850,16 +948,145 @@ function saveEdit(fileId) {
     title: $('#edTitle').value.trim(),
     content: $('#edContent').value
   };
+}
+
+// Lưu thay đổi rồi chạy callback (dùng cho chế độ sửa liên tục). Không refresh để giữ nguyên thứ tự danh sách.
+function saveEditThen_(fileId, after) {
   showLoading(true, 'Đang lưu...');
-  call('updateDoc', payload).then(function () {
+  call('updateDoc', editPayload_(fileId)).then(function () {
+    EDIT_SNAP_ = editValues_(); // đã lưu -> hết "thay đổi chưa lưu"
     showLoading(false);
     toast('Đã lưu thay đổi.', 'ok');
+    if (after) after();
+  }).catch(function (err) { showLoading(false); toast('Lỗi lưu: ' + (err.message || err), 'err'); });
+}
+
+function saveEdit(fileId) {
+  saveEditThen_(fileId, function () {
     openDetail(fileId);
     // làm mới danh sách/kết quả/thống kê ngay, không cần refresh trang
     refreshResults();
     loadStats();
-  }).catch(function (err) { showLoading(false); toast('Lỗi lưu: ' + (err.message || err), 'err'); });
+  });
 }
+
+/* ============ Áp dụng hàng loạt (chọn nhiều văn bản, đặt trường chung 1 lần) ============ */
+// Thanh chọn phía trên danh sách (chỉ quản trị viên).
+function buildBatchBar_() {
+  var bar = el('div', 'batch-bar');
+  bar.setAttribute('style', 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 10px;padding:8px 10px;border:1px dashed var(--border,#ccc);border-radius:8px');
+  bar.innerHTML =
+    '<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin:0">' +
+      '<input type="checkbox" id="selAll"> Chọn tất cả trên trang' +
+    '</label>' +
+    '<button class="btn btn-primary" id="btnApplyBatch" disabled>✎ Áp dụng hàng loạt</button>' +
+    '<span class="muted" id="selCount">Chưa chọn văn bản nào</span>';
+  bar.querySelector('#selAll').addEventListener('change', function () { selectAllInView_(this.checked); });
+  bar.querySelector('#btnApplyBatch').addEventListener('click', openBatchEdit_);
+  return bar;
+}
+// Ô tick cho từng văn bản.
+function buildDocCheck_(fileId) {
+  var wrap = el('label', 'doc-check');
+  wrap.setAttribute('style', 'display:flex;align-items:center;padding:0 6px 0 2px;cursor:pointer');
+  var cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.setAttribute('data-sel', fileId);
+  cb.addEventListener('change', function () { toggleSel_(fileId, cb.checked); });
+  wrap.appendChild(cb);
+  return wrap;
+}
+function selectedIds_() { return Object.keys(STATE.selected || {}); }
+function toggleSel_(fileId, on) {
+  STATE.selected = STATE.selected || {};
+  if (on) STATE.selected[fileId] = true; else delete STATE.selected[fileId];
+  updateBatchBar_();
+}
+function selectAllInView_(on) {
+  STATE.selected = {};
+  if (on) (STATE.viewList || []).forEach(function (id) { STATE.selected[id] = true; });
+  $all('input[data-sel]').forEach(function (cb) { cb.checked = on; });
+  updateBatchBar_();
+}
+// Cập nhật nhãn số lượng + trạng thái nút + ô "chọn tất cả".
+function updateBatchBar_() {
+  var n = selectedIds_().length;
+  var cnt = $('#selCount'); if (cnt) cnt.textContent = n ? ('Đã chọn ' + n + ' văn bản') : 'Chưa chọn văn bản nào';
+  var btn = $('#btnApplyBatch'); if (btn) btn.disabled = !n;
+  var all = $('#selAll');
+  if (all) { var total = (STATE.viewList || []).length; all.checked = total > 0 && n >= total; }
+}
+
+// Mở form đặt trường chung cho các văn bản đã chọn.
+function openBatchEdit_() {
+  var ids = selectedIds_();
+  if (!ids.length) { toast('Chưa chọn văn bản nào.', 'err'); return; }
+
+  var typeOpts = '<option value="">— Không đổi —</option>' +
+    (STATE.docTypes || []).map(function (t) { return '<option value="' + esc(t.code) + '">' + esc(t.name) + '</option>'; }).join('') +
+    '<option value="KHAC">Khác</option>';
+  var levelOpts = '<option value="">— Không đổi —</option>' +
+    (STATE.issuerLevels || []).map(function (lv) { return '<option value="' + esc(lv) + '">' + esc(lv) + '</option>'; }).join('');
+  var noChange_ = function (options) {
+    return '<option value="">— Không đổi —</option>' +
+      (options || []).map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('');
+  };
+  var issuerList = (STATE.issuers || []).map(function (it) { return '<option value="' + esc(it.name) + '">'; }).join('');
+
+  var html =
+    '<h2>Áp dụng hàng loạt</h2>' +
+    '<p class="muted">Đặt cùng lúc các trường bên dưới cho <b>' + ids.length + '</b> văn bản đã chọn. ' +
+      'Để trống ô nào thì trường đó <b>giữ nguyên</b> ở mọi văn bản.</p>' +
+    '<datalist id="issuerListBatch">' + issuerList + '</datalist>' +
+    '<div class="edit-grid">' +
+      '<label>Loại văn bản<select id="bType" class="input">' + typeOpts + '</select></label>' +
+      '<label>Đơn vị ban hành<input id="bIssuer" class="input" list="issuerListBatch" placeholder="— Không đổi —"></label>' +
+      '<label>Cấp ban hành<select id="bLevel" class="input">' + levelOpts + '</select></label>' +
+      '<label>Trạng thái xử lý<select id="bStatus" class="input">' + noChange_(STATE.statusOptions) + '</select></label>' +
+      '<label>Độ mật<select id="bSecurity" class="input">' + noChange_(STATE.securityOptions) + '</select></label>' +
+      '<label>Độ khẩn<select id="bUrgency" class="input">' + noChange_(STATE.urgencyOptions) + '</select></label>' +
+    '</div>' +
+    '<div class="form-row" style="margin-top:14px">' +
+      '<button class="btn btn-primary" id="btnBatchApply">Áp dụng cho ' + ids.length + ' văn bản</button>' +
+      '<button class="btn" id="btnBatchCancel">Huỷ</button>' +
+    '</div>' +
+    '<p class="muted" style="margin-top:8px">Các văn bản được đánh dấu <b>"Đã sửa tay"</b> nên sẽ <b>không bị ghi đè</b> khi quét lại. ' +
+      'Đổi <b>đơn vị ban hành</b> sẽ tính lại key phrases &amp; hồ sơ phân tích của từng văn bản.</p>';
+  $('#modalContent').innerHTML = html;
+  setModalWide_(false);
+  $('#modal').classList.remove('hidden');
+  // Chọn đơn vị có sẵn -> gợi ý cấp ban hành tương ứng.
+  $('#bIssuer').addEventListener('change', function () {
+    var name = this.value.trim();
+    var match = (STATE.issuers || []).filter(function (it) { return it.name === name; })[0];
+    if (match && match.level) $('#bLevel').value = match.level;
+  });
+  $('#btnBatchCancel').addEventListener('click', closeModal);
+  $('#btnBatchApply').addEventListener('click', function () { doBatchApply_(ids); });
+}
+
+function doBatchApply_(ids) {
+  var fields = {
+    docTypeCode: $('#bType').value,
+    issuer: $('#bIssuer').value.trim(),
+    issuerLevel: $('#bLevel').value,
+    status: $('#bStatus').value,
+    security: $('#bSecurity').value,
+    urgency: $('#bUrgency').value
+  };
+  var chosen = ['docTypeCode', 'issuer', 'issuerLevel', 'status', 'security', 'urgency']
+    .some(function (k) { return fields[k] !== ''; });
+  if (!chosen) { toast('Hãy chọn ít nhất một trường để áp dụng.', 'err'); return; }
+  showLoading(true, 'Đang áp dụng cho ' + ids.length + ' văn bản...');
+  call('updateDocsBatch', { fileIds: ids, fields: fields }).then(function (r) {
+    showLoading(false);
+    closeModal();
+    toast('Đã cập nhật ' + (r.updated || 0) + '/' + (r.requested || ids.length) + ' văn bản.', 'ok');
+    refreshResults();
+    loadStats();
+  }).catch(function (err) { showLoading(false); toast('Lỗi áp dụng: ' + (err.message || err), 'err'); });
+}
+
 function row(k, v) { return '<div class="k">' + k + '</div><div>' + v + '</div>'; }
 function closeModal() { $('#modal').classList.add('hidden'); setModalWide_(false); }
 
