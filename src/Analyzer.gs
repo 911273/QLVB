@@ -117,7 +117,7 @@ function analysisToString_(o) {
 }
 /** Đọc hồ sơ phân tích từ chuỗi JSON; luôn trả cấu trúc đầy đủ. */
 function parseAnalysis_(str) {
-  var empty = { topic: '', field: '', concepts: [], entities: [], legalRefs: [] };
+  var empty = { topic: '', field: '', concepts: [], entities: [], legalRefs: [], kwManual: false, fieldManual: false };
   if (!str) return empty;
   try {
     var o = JSON.parse(str);
@@ -126,7 +126,9 @@ function parseAnalysis_(str) {
       field: o.field || '',
       concepts: Array.isArray(o.concepts) ? o.concepts : [],
       entities: Array.isArray(o.entities) ? o.entities : [],
-      legalRefs: Array.isArray(o.legalRefs) ? o.legalRefs : []
+      legalRefs: Array.isArray(o.legalRefs) ? o.legalRefs : [],
+      kwManual: !!o.kwManual,
+      fieldManual: !!o.fieldManual
     };
   } catch (e) { return empty; }
 }
@@ -136,10 +138,39 @@ function parseAnalysis_(str) {
  * Đây là điểm vào duy nhất được các hook (OCR xong / cập nhật / quét) gọi -> tránh trùng code.
  */
 function analyzeAndAttach_(doc) {
+  var prev = parseAnalysis_(doc.analysis);
+  // Cờ sửa tay: ưu tiên cờ đặt tường minh trên doc, nếu không thì lấy từ hồ sơ đã lưu.
+  var kwManual = (doc.kwManual != null) ? !!doc.kwManual : !!prev.kwManual;
+  var fieldManual = (doc.fieldManual != null) ? !!doc.fieldManual : !!prev.fieldManual;
+
   var res = buildAnalysis_(doc);
-  doc.keywords = profileToString_(res.keyphrases);
+  if (!kwManual) doc.keywords = profileToString_(res.keyphrases); // else giữ key phrases đặt tay
+  if (!fieldManual) doc.field = res.obj.field;                    // else giữ lĩnh vực đặt tay
+
+  res.obj.kwManual = kwManual;
+  res.obj.fieldManual = fieldManual;
   doc.analysis = analysisToString_(res.obj);
   return doc;
+}
+
+/**
+ * Giải các quan hệ văn bản (fileId) thành thông tin gọn để hiển thị (tiêu đề, số, ngày, hiệu lực).
+ */
+function resolveRelations_(relStr) {
+  var rel = parseRelations_(relStr);
+  function lite(id) {
+    var d = getDocDetailFast_(id);
+    if (!d) return { fileId: String(id), title: '(không còn trong CSDL)', missing: true };
+    return {
+      fileId: d.fileId, title: d.title || d.fileName, docType: d.docType,
+      docNumber: d.docNumber, issuedDate: d.issuedDate, validity: d.validity
+    };
+  }
+  return {
+    replaces: rel.replaces.map(lite),
+    replacedBy: rel.replacedBy.map(lite),
+    related: rel.related.map(lite)
+  };
 }
 
 /**

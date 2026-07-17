@@ -161,7 +161,10 @@ function processFile_(f, existing) {
     security: 'Thường',
     urgency: 'Thường',
     keywords: '',
-    analysis: ''
+    analysis: '',
+    field: '',
+    validity: 'Chưa xác định',
+    relations: ''
   };
   analyzeAndAttach_(doc); // tính key phrases + hồ sơ phân tích (nội dung có thể rỗng nếu chờ OCR)
   var op = upsertDoc_(doc, existing);

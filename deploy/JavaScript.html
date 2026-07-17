@@ -181,7 +181,7 @@ function bindTabs() {
       $('#tab-' + tab.dataset.tab).classList.add('active');
       if (tab.dataset.tab === 'list') loadList(1);
       if (tab.dataset.tab === 'overview') loadStats();
-      if (tab.dataset.tab === 'settings') { renderTypesTable(); renderIssuersTable(); renderVisionStatus(); renderAccounts(); renderTrashBadge(); }
+      if (tab.dataset.tab === 'settings') { renderTypesTable(); renderIssuersTable(); renderFieldsTable(); renderVisionStatus(); renderAccounts(); renderTrashBadge(); }
       if (tab.dataset.tab === 'scan') { loadUploadHint(); renderOcrQueue(); renderDupStatus(); }
     });
   });
@@ -239,6 +239,9 @@ function bindActions() {
   $('#btnAddIssuer').addEventListener('click', addIssuerRow);
   $('#btnSaveIssuers').addEventListener('click', saveIssuers);
   $('#btnResetIssuers').addEventListener('click', resetIssuers);
+  var baf = $('#btnAddField'); if (baf) baf.addEventListener('click', addFieldRow);
+  var bsf = $('#btnSaveFields'); if (bsf) bsf.addEventListener('click', saveFieldsUi);
+  var brf = $('#btnResetFields'); if (brf) brf.addEventListener('click', resetFieldsUi);
   $('#btnSaveVision').addEventListener('click', saveVision);
   $('#btnTestVision').addEventListener('click', testVision);
   $('#btnClearVision').addEventListener('click', clearVision);
@@ -260,9 +263,10 @@ function loadStatus() {
     STATE.docTypes = st.docTypes || [];
     STATE.issuers = st.issuers || [];
     STATE.issuerLevels = st.issuerLevels || [];
-    STATE.statusOptions = st.statusOptions || [];
-    STATE.securityOptions = st.securityOptions || [];
-    STATE.urgencyOptions = st.urgencyOptions || [];
+    STATE.fields = st.fields || [];
+    STATE.fieldNames = st.fieldNames || [];
+    STATE.validityOptions = st.validityOptions || [];
+    STATE.procStatusOptions = st.procStatusOptions || [];
     STATE.me = st.me || STATE.me;
     showApp();
     renderUserBox();
@@ -319,6 +323,7 @@ function applyAcl() {
   toggleEl('#cardVision', can('config'));
   toggleEl('#cardTypes', can('config'));
   toggleEl('#cardIssuers', can('config'));
+  toggleEl('#cardFields', can('config'));
   toggleEl('#cardAccounts', can('accounts'));
   toggleEl('#cardAudit', can('accounts'));
   toggleEl('#cardTrash', can('delete'));
@@ -327,9 +332,6 @@ function applyAcl() {
   toggleEl('#btnBulkEdit', isAdmin());
   toggleEl('#btnBulkEditList', isAdmin());
   ensureStorageCard_(); // Thẻ "Database Storage" chỉ dành cho quản trị viên.
-  // Tài khoản free: ẩn ô lọc trạng thái & độ mật.
-  toggleEl('#fStatus', showWorkflow());
-  toggleEl('#fSecurity', showWorkflow());
   // Khách chưa đăng nhập: ẩn thẻ đổi mật khẩu.
   var loggedIn = !!(STATE.me && STATE.me.role && STATE.me.role !== 'guest');
   toggleEl('#cardPassword', loggedIn);
@@ -357,9 +359,10 @@ function doInitialize() {
     STATE.docTypes = st.docTypes || [];
     STATE.issuers = st.issuers || [];
     STATE.issuerLevels = st.issuerLevels || [];
-    STATE.statusOptions = st.statusOptions || [];
-    STATE.securityOptions = st.securityOptions || [];
-    STATE.urgencyOptions = st.urgencyOptions || [];
+    STATE.fields = st.fields || [];
+    STATE.fieldNames = st.fieldNames || [];
+    STATE.validityOptions = st.validityOptions || [];
+    STATE.procStatusOptions = st.procStatusOptions || [];
     $('#initBanner').classList.add('hidden');
     fillTypeSelects();
     fillLevelSelect();
@@ -398,13 +401,14 @@ function fillLevelSelect() {
       return '<option value="' + esc(it.name) + '">';
     }).join('');
   }
-  // Bộ lọc trạng thái & độ mật.
-  var ss = $('#sStatus');
-  if (ss) ss.innerHTML = '<option value="">— Trạng thái —</option>' +
-    (STATE.statusOptions || []).map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('');
-  var sc = $('#sSecurity');
-  if (sc) sc.innerHTML = '<option value="">— Độ mật —</option>' +
-    (STATE.securityOptions || []).map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('');
+  // Bộ lọc: Lĩnh vực, Hiệu lực, Trạng thái xử lý.
+  var optize = function (arr, label) {
+    return '<option value="">— ' + label + ' —</option>' +
+      (arr || []).map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('');
+  };
+  var sf = $('#sField'); if (sf) sf.innerHTML = optize(STATE.fieldNames, 'Lĩnh vực');
+  var sv = $('#sValidity'); if (sv) sv.innerHTML = optize(STATE.validityOptions, 'Hiệu lực');
+  var sp = $('#sProc'); if (sp) sp.innerHTML = optize(STATE.procStatusOptions, 'Trạng thái xử lý');
 }
 
 /* ============ Tổng quan ============ */
@@ -472,8 +476,9 @@ function doSearch(page, silent) {
     issuerLevel: $('#sLevel').value,
     issuer: $('#sIssuer') ? $('#sIssuer').value.trim() : '',
     docNumber: $('#sNumber') ? $('#sNumber').value.trim() : '',
-    status: $('#sStatus') ? $('#sStatus').value : '',
-    security: $('#sSecurity') ? $('#sSecurity').value : '',
+    field: $('#sField') ? $('#sField').value : '',
+    validity: $('#sValidity') ? $('#sValidity').value : '',
+    procStatus: $('#sProc') ? $('#sProc').value : '',
     fromDate: dmyToIso($('#sFrom').value),
     toDate: dmyToIso($('#sTo').value),
     sortBy: sort[0], sortDir: sort[1],
@@ -505,8 +510,9 @@ function doExport() {
     issuerLevel: $('#sLevel').value,
     issuer: $('#sIssuer').value.trim(),
     docNumber: $('#sNumber').value.trim(),
-    status: $('#sStatus').value,
-    security: $('#sSecurity').value,
+    field: $('#sField') ? $('#sField').value : '',
+    validity: $('#sValidity') ? $('#sValidity').value : '',
+    procStatus: $('#sProc') ? $('#sProc').value : '',
     fromDate: dmyToIso($('#sFrom').value),
     toDate: dmyToIso($('#sTo').value),
     sortBy: sort[0], sortDir: sort[1]
@@ -532,8 +538,9 @@ function clearSearch() {
   });
   if ($('#sType')) $('#sType').value = '';
   if ($('#sLevel')) $('#sLevel').value = '';
-  if ($('#sStatus')) $('#sStatus').value = '';
-  if ($('#sSecurity')) $('#sSecurity').value = '';
+  if ($('#sField')) $('#sField').value = '';
+  if ($('#sValidity')) $('#sValidity').value = '';
+  if ($('#sProc')) $('#sProc').value = '';
   if ($('#sSort')) $('#sSort').value = 'relevance|desc';
   doSearch(1);
 }
@@ -579,10 +586,9 @@ function renderResults(sel, res, keyword) {
         '<span>Ngày BH: <b>' + fmtDate(d.issuedDate) + '</b></span>' +
         (d.issuer ? '<span>ĐV: <b>' + esc(d.issuer) + '</b>' + (d.issuerLevel ? ' <span class="tag">' + esc(d.issuerLevel) + '</span>' : '') + '</span>' : (d.issuerLevel ? '<span class="tag">' + esc(d.issuerLevel) + '</span>' : '')) +
         '<span>' + esc(d.fileName) + '</span>' +
-        (ocrLabel(d.ocrStatus) ? '<span class="tag ' + esc(d.ocrStatus) + '">' + ocrLabel(d.ocrStatus) + '</span>' : '') +
-        (showWorkflow() && d.status ? '<span class="tag st-' + statusClass_(d.status) + '">' + esc(d.status) + '</span>' : '') +
-        (showWorkflow() && d.security && d.security !== 'Thường' ? '<span class="tag sec">' + esc(d.security) + '</span>' : '') +
-        (showWorkflow() && d.urgency && d.urgency !== 'Thường' ? '<span class="tag urg">' + esc(d.urgency) + '</span>' : '') +
+        (d.procStatus ? '<span class="tag">' + esc(d.procStatus) + '</span>' : '') +
+        (d.field ? '<span class="tag">' + esc(d.field) + '</span>' : '') +
+        (d.validity && d.validity === 'Hết hiệu lực' ? '<span class="tag urg">Hết hiệu lực</span>' : '') +
       '</div>' +
       (d.snippet ? '<div class="doc-snippet">' + highlight(esc(d.snippet), terms) + '</div>' : '');
     var actions = el('div', 'doc-actions');
@@ -678,19 +684,19 @@ function openDetail(fileId) {
           '<h2>' + esc(d.title || d.fileName) + '</h2>' +
           '<div class="detail-chips">' +
             chip(d.docType) +
-            (an.field ? chip('Lĩnh vực: ' + an.field) : '') +
+            (d.field ? chip('Lĩnh vực: ' + d.field) : '') +
             (d.docNumber ? chip('Số: ' + d.docNumber) : '') +
             chip('Ngày: ' + fmtDate(d.issuedDate)) +
             (d.issuer ? chip(d.issuer) : '') +
-            (showWorkflow() && d.status ? chip(d.status) : '') +
-            (showWorkflow() && d.security && d.security !== 'Thường' ? chip(d.security) : '') +
-            (showWorkflow() && d.urgency && d.urgency !== 'Thường' ? chip(d.urgency) : '') +
+            (d.procStatus ? chip(d.procStatus) : '') +
+            (d.validity && d.validity !== 'Chưa xác định' ? chip(d.validity) : '') +
           '</div>' +
         '</div>' +
       '</div>' +
       '<div class="form-row" style="margin-top:12px">' +
         '<a class="btn btn-primary" href="' + esc(d.fileUrl) + '" target="_blank">Mở trên Drive</a>' +
         (can('edit') ? '<button class="btn" id="btnEditDoc">✎ Sửa thông tin</button>' : '') +
+        (can('edit') && d.procStatus === 'Chưa kiểm tra' ? '<button class="btn" id="btnMarkChecked">✓ Đánh dấu đã kiểm tra</button>' : '') +
         (can('scan') ? '<button class="btn" id="btnReOcr">OCR lại</button>' : '') +
         (can('delete') ? '<button class="btn btn-danger" id="btnDeleteDoc">🗑 Xoá văn bản</button>' : '') +
       '</div>' +
@@ -705,9 +711,9 @@ function openDetail(fileId) {
         row('Số/Ký hiệu', esc(d.docNumber || '—')) +
         row('Đơn vị ban hành', esc(d.issuer || '—')) +
         row('Cấp ban hành', esc(d.issuerLevel || '—')) +
-        (showWorkflow() ? row('Trạng thái xử lý', esc(d.status || '—')) : '') +
-        (showWorkflow() ? row('Độ mật', esc(d.security || '—')) : '') +
-        (showWorkflow() ? row('Độ khẩn', esc(d.urgency || '—')) : '') +
+        row('Lĩnh vực', esc(d.field || '—')) +
+        row('Hiệu lực', esc(d.validity || 'Chưa xác định')) +
+        row('Trạng thái xử lý', esc(d.procStatus || '—')) +
         row('Ngày ban hành', fmtDate(d.issuedDate)) +
         row('Tên file', esc(d.fileName)) +
         row('Đường dẫn', esc(d.folderPath || '/')) +
@@ -719,11 +725,16 @@ function openDetail(fileId) {
           k = k.trim(); var p = k.lastIndexOf('|'); if (p !== -1) k = k.substring(0, p).trim();
           return k ? '<span class="chip kw">' + esc(k) + '</span>' : '';
         }).join('') + '</div>' : '') +
-      '<h3 style="margin-top:16px">Tài liệu liên quan</h3>' +
+      relationsBlock_(d.relationsResolved) +
+      '<h3 style="margin-top:16px">Tài liệu liên quan (tự động)</h3>' +
       '<div id="relatedBox" class="related-box"><span class="muted">Đang tìm tài liệu liên quan...</span></div>' +
       '<h3 style="margin-top:16px">Nội dung trích xuất' + (d.ocrProgress ? ' <span class="muted" style="font-weight:normal">(đã OCR ' + esc(d.ocrProgress) + ' trang)</span>' : '') + '</h3>' +
       '<div class="detail-content">' + (d.content ? esc(d.content) : '<i>Chưa có nội dung OCR. Xem bản gốc phía trên; nội dung sẽ có sau khi hàng đợi OCR xử lý, hoặc bấm "OCR lại" / "Sửa thông tin".</i>') + '</div>';
     $('#modalContent').innerHTML = html;
+    // Mở chi tiết cho các văn bản liên kết thủ công (bind ngay; phần "tự động" bind sau khi tải).
+    $all('[data-rel]', $('#modalContent')).forEach(function (it) {
+      it.addEventListener('click', function () { openDetail(it.getAttribute('data-rel')); });
+    });
     loadRelated(d.fileId);
     setModalWide_(false);
     // Trên điện thoại: thu gọn "Thông tin chi tiết" để ưu tiên đọc bản gốc.
@@ -735,6 +746,40 @@ function openDetail(fileId) {
     if (btnE) btnE.addEventListener('click', function () { openEditForm(d); });
     var btnD = $('#btnDeleteDoc');
     if (btnD) btnD.addEventListener('click', function () { deleteDocUi(d); });
+    var btnMc = $('#btnMarkChecked');
+    if (btnMc) btnMc.addEventListener('click', function () { markChecked_(d.fileId); });
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+// Khối hiển thị quan hệ văn bản (thay thế / bị thay thế / liên quan thủ công).
+function relationsBlock_(rr) {
+  if (!rr) return '';
+  function sec(title, list) {
+    if (!list || !list.length) return '';
+    return '<h3 style="margin-top:16px">' + title + '</h3><div class="related-box">' +
+      list.map(function (x) {
+        return '<div class="related-item" data-rel="' + esc(x.fileId) + '">' +
+          '<div class="related-title">' + esc(x.title || '(không tên)') + (x.missing ? ' <span class="tag urg">?</span>' : '') + '</div>' +
+          '<div class="muted" style="font-size:12px">' + esc(x.docType || '') +
+            (x.docNumber ? ' • Số: ' + esc(x.docNumber) : '') +
+            (x.issuedDate ? ' • ' + fmtDate(x.issuedDate) : '') +
+            (x.validity && x.validity !== 'Chưa xác định' ? ' • ' + esc(x.validity) : '') +
+          '</div></div>';
+      }).join('') + '</div>';
+  }
+  return sec('Văn bản này thay thế', rr.replaces) +
+    sec('Bị thay thế bởi', rr.replacedBy) +
+    sec('Văn bản liên quan (liên kết thủ công)', rr.related);
+}
+
+// Đánh dấu "Đã kiểm tra" (đặt cờ đã sửa tay, không đổi metadata khác).
+function markChecked_(fileId) {
+  showLoading(true, 'Đang cập nhật...');
+  call('updateDoc', { fileId: fileId }).then(function () {
+    showLoading(false);
+    toast('Đã đánh dấu đã kiểm tra.', 'ok');
+    openDetail(fileId);
+    refreshResults();
   }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
 }
 
@@ -784,7 +829,13 @@ function optList_(options, sel) {
   }).join('');
 }
 // Snapshot giá trị các ô trong form sửa để phát hiện thay đổi chưa lưu.
-var EDIT_FIELDS_ = ['edType', 'edNumber', 'edIssuer', 'edLevel', 'edStatus', 'edSecurity', 'edUrgency', 'edDate', 'edTitle', 'edContent'];
+var EDIT_FIELDS_ = ['edType', 'edNumber', 'edIssuer', 'edLevel', 'edField', 'edValidity', 'edDate', 'edTitle', 'edContent'];
+// Trạng thái editor từ khóa & liên kết văn bản của form Sửa hiện tại.
+var EDIT_KW_ = [];        // mảng key phrase (hiển thị)
+var EDIT_KW_DIRTY_ = false;
+var EDIT_KW_AUTO_ = false;
+var EDIT_REL_ = { replaces: [], related: [] }; // mỗi phần tử {fileId, title}
+var EDIT_DOC_ID_ = '';    // fileId văn bản đang sửa (để loại khỏi kết quả liên kết)
 var EDIT_SNAP_ = '';
 function editValues_() {
   return EDIT_FIELDS_.map(function (id) { var e = $('#' + id); return e ? e.value : ''; }).join('');
@@ -837,6 +888,18 @@ function startBulkEdit() {
  */
 function openEditForm(d, nav) {
   nav = nav || null;
+  // Khởi tạo editor từ khóa + liên kết văn bản cho form này.
+  EDIT_KW_ = (d.keywords || '').split(',').map(function (k) {
+    k = k.trim(); var p = k.lastIndexOf('|'); if (p !== -1) k = k.substring(0, p).trim(); return k;
+  }).filter(Boolean);
+  EDIT_KW_DIRTY_ = false; EDIT_KW_AUTO_ = false;
+  var rr = d.relationsResolved || { replaces: [], related: [] };
+  EDIT_REL_ = {
+    replaces: (rr.replaces || []).map(function (x) { return { fileId: x.fileId, title: x.title }; }),
+    related: (rr.related || []).map(function (x) { return { fileId: x.fileId, title: x.title }; })
+  };
+  EDIT_DOC_ID_ = d.fileId;
+
   var typeOpts = (STATE.docTypes || []).map(function (t) {
     return '<option value="' + esc(t.code) + '"' + (t.code === d.docTypeCode ? ' selected' : '') + '>' + esc(t.name) + '</option>';
   }).join('');
@@ -855,15 +918,28 @@ function openEditForm(d, nav) {
       '<label>Số/Ký hiệu<input id="edNumber" class="input" value="' + esc(d.docNumber || '') + '" placeholder="VD: 510/QĐ-ĐHĐL"></label>' +
       '<label>Đơn vị ban hành<input id="edIssuer" class="input" list="issuerList" value="' + esc(d.issuer || '') + '" placeholder="VD: Trường Đại học Điện lực"></label>' +
       '<label>Cấp ban hành<select id="edLevel" class="input">' + levelOpts + '</select></label>' +
-      '<label>Trạng thái xử lý<select id="edStatus" class="input">' + optList_(STATE.statusOptions, d.status) + '</select></label>' +
-      '<label>Độ mật<select id="edSecurity" class="input">' + optList_(STATE.securityOptions, d.security) + '</select></label>' +
-      '<label>Độ khẩn<select id="edUrgency" class="input">' + optList_(STATE.urgencyOptions, d.urgency) + '</select></label>' +
+      '<label>Lĩnh vực<select id="edField" class="input">' + fieldOpts_(d) + '</select></label>' +
+      '<label>Hiệu lực<select id="edValidity" class="input">' + optList_(STATE.validityOptions, d.validity || 'Chưa xác định') + '</select></label>' +
       '<label>Ngày ban hành<span class="date-field">' +
         '<input id="edDate" type="text" class="input date-text" placeholder="dd/mm/yyyy" inputmode="numeric" maxlength="10" value="' + esc(isoToDmy(d.issuedDate)) + '">' +
         '<span class="date-btn">📅<input type="date" class="date-native" tabindex="-1"></span>' +
       '</span></label>' +
       '<label class="full">Trích yếu / Tiêu đề<input id="edTitle" class="input" value="' + esc(d.title || '') + '"></label>' +
       '<label class="full">Nội dung (sửa nếu OCR sai/thiếu)<textarea id="edContent" class="input" rows="8">' + esc(d.content || '') + '</textarea></label>' +
+      '<label class="full">Từ khóa (thêm / sửa / xóa)' +
+        '<div id="edKwChips" class="detail-chips" style="margin:4px 0"></div>' +
+        '<span class="form-row" style="margin:0">' +
+          '<input id="edKwInput" class="input grow" placeholder="Nhập cụm từ khóa rồi Enter / bấm Thêm">' +
+          '<button type="button" class="btn" id="edKwAdd">Thêm</button>' +
+          '<button type="button" class="btn" id="edKwAuto" title="Xóa từ khóa thủ công, để hệ thống tự sinh lại">↺ Tự động</button>' +
+        '</span>' +
+      '</label>' +
+      '<label class="full">Văn bản này thay thế <span class="muted">(văn bản được chọn sẽ bị đặt "Hết hiệu lực")</span>' +
+        relLinker_('Replaces') +
+      '</label>' +
+      '<label class="full">Văn bản liên quan (liên kết thủ công)' +
+        relLinker_('Related') +
+      '</label>' +
     '</div>' +
     '<div class="form-row" style="margin-top:14px">' +
       '<button class="btn btn-primary" id="btnSaveEdit">Lưu thay đổi</button>' +
@@ -931,23 +1007,129 @@ function openEditForm(d, nav) {
     var match = (STATE.issuers || []).filter(function (it) { return it.name === name; })[0];
     if (match && match.level) $('#edLevel').value = match.level;
   });
+
+  // Editor từ khóa.
+  renderKwChips_();
+  $('#edKwAdd').addEventListener('click', kwAdd_);
+  $('#edKwInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); kwAdd_(); } });
+  $('#edKwAuto').addEventListener('click', function () {
+    EDIT_KW_ = []; EDIT_KW_AUTO_ = true; EDIT_KW_DIRTY_ = false; renderKwChips_();
+  });
+  // Liên kết văn bản.
+  renderRelChips_('Replaces'); renderRelChips_('Related');
+  $('#relReplacesBtn').addEventListener('click', function () { relSearch_('Replaces'); });
+  $('#relRelatedBtn').addEventListener('click', function () { relSearch_('Related'); });
+}
+
+/* ---- Editor từ khóa ---- */
+function fieldOpts_(d) {
+  var cur = d.field || '';
+  var auto = (d.analysisObj && d.analysisObj.fieldManual) ? '' : cur; // gợi ý
+  var opts = '<option value=""' + (cur ? '' : ' selected') + '>— Tự động' + (auto ? ' (' + auto + ')' : '') + ' —</option>';
+  opts += (STATE.fieldNames || []).map(function (f) {
+    return '<option value="' + esc(f) + '"' + (f === cur ? ' selected' : '') + '>' + esc(f) + '</option>';
+  }).join('');
+  // Nếu lĩnh vực hiện tại không nằm trong danh mục, vẫn giữ lựa chọn.
+  if (cur && (STATE.fieldNames || []).indexOf(cur) === -1) {
+    opts += '<option value="' + esc(cur) + '" selected>' + esc(cur) + '</option>';
+  }
+  return opts;
+}
+function renderKwChips_() {
+  var box = $('#edKwChips'); if (!box) return;
+  if (!EDIT_KW_.length) { box.innerHTML = '<span class="muted">' + (EDIT_KW_AUTO_ ? '(sẽ tự sinh lại khi lưu)' : 'Chưa có từ khóa') + '</span>'; return; }
+  box.innerHTML = EDIT_KW_.map(function (k, i) {
+    return '<span class="chip kw">' + esc(k) + ' <a href="#" data-kwdel="' + i + '" style="text-decoration:none">×</a></span>';
+  }).join('');
+  $all('[data-kwdel]', box).forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      EDIT_KW_.splice(parseInt(a.getAttribute('data-kwdel'), 10), 1);
+      EDIT_KW_DIRTY_ = true; EDIT_KW_AUTO_ = false; renderKwChips_();
+    });
+  });
+}
+function kwAdd_() {
+  var inp = $('#edKwInput'); if (!inp) return;
+  var v = inp.value.trim();
+  if (!v) return;
+  if (EDIT_KW_.map(function (x) { return x.toLowerCase(); }).indexOf(v.toLowerCase()) === -1) EDIT_KW_.push(v);
+  inp.value = ''; EDIT_KW_DIRTY_ = true; EDIT_KW_AUTO_ = false; renderKwChips_();
+}
+
+/* ---- Liên kết văn bản ---- */
+function relLinker_(kind) {
+  return '<div id="rel' + kind + 'Chips" class="detail-chips" style="margin:4px 0"></div>' +
+    '<span class="form-row" style="margin:0">' +
+      '<input id="rel' + kind + 'Q" class="input grow" placeholder="Tìm văn bản theo tên/số/nội dung...">' +
+      '<button type="button" class="btn" id="rel' + kind + 'Btn">Tìm</button>' +
+    '</span>' +
+    '<div id="rel' + kind + 'Results" class="related-box" style="margin-top:4px"></div>';
+}
+function renderRelChips_(kind) {
+  var box = $('#rel' + kind + 'Chips'); if (!box) return;
+  var list = EDIT_REL_[kind.toLowerCase()];
+  if (!list.length) { box.innerHTML = '<span class="muted">Chưa liên kết văn bản nào</span>'; return; }
+  box.innerHTML = list.map(function (x, i) {
+    return '<span class="chip">' + esc(x.title || x.fileId) + ' <a href="#" data-reldel="' + i + '" style="text-decoration:none">×</a></span>';
+  }).join('');
+  $all('[data-reldel]', box).forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      list.splice(parseInt(a.getAttribute('data-reldel'), 10), 1);
+      renderRelChips_(kind);
+    });
+  });
+}
+function relSearch_(kind) {
+  var q = $('#rel' + kind + 'Q').value.trim();
+  var box = $('#rel' + kind + 'Results');
+  box.innerHTML = '<span class="muted">Đang tìm...</span>';
+  call('search', { keyword: q, page: 1, pageSize: 8 }).then(function (res) {
+    var items = (res.items || []).filter(function (it) { return it.fileId !== EDIT_DOC_ID_; });
+    if (!items.length) { box.innerHTML = '<span class="muted">Không tìm thấy.</span>'; return; }
+    box.innerHTML = items.map(function (it) {
+      return '<div class="related-item" data-reladd="' + esc(it.fileId) + '">' +
+        '<div class="related-title">' + esc(it.title || it.fileName) + '</div>' +
+        '<div class="muted" style="font-size:12px">' + esc(it.docType || '') +
+          (it.docNumber ? ' • Số: ' + esc(it.docNumber) : '') + (it.issuedDate ? ' • ' + fmtDate(it.issuedDate) : '') + '</div></div>';
+    }).join('');
+    $all('[data-reladd]', box).forEach(function (el2) {
+      el2.addEventListener('click', function () {
+        var id = el2.getAttribute('data-reladd');
+        var list = EDIT_REL_[kind.toLowerCase()];
+        if (list.map(function (x) { return x.fileId; }).indexOf(id) === -1) {
+          var t = el2.querySelector('.related-title').textContent;
+          list.push({ fileId: id, title: t });
+          renderRelChips_(kind);
+        }
+        box.innerHTML = '';
+      });
+    });
+  }).catch(function (err) { box.innerHTML = '<span class="muted">Lỗi tìm: ' + esc(err.message || err) + '</span>'; });
 }
 
 // Thu thập payload sửa từ các ô trong form.
 function editPayload_(fileId) {
-  return {
+  var p = {
     fileId: fileId,
     docTypeCode: $('#edType').value,
     docNumber: $('#edNumber').value.trim(),
     issuer: $('#edIssuer').value.trim(),
     issuerLevel: $('#edLevel').value,
-    status: $('#edStatus').value,
-    security: $('#edSecurity').value,
-    urgency: $('#edUrgency').value,
+    field: $('#edField') ? $('#edField').value : '',
+    validity: $('#edValidity') ? $('#edValidity').value : '',
     issuedDate: $('#edDate').value,
     title: $('#edTitle').value.trim(),
-    content: $('#edContent').value
+    content: $('#edContent').value,
+    relations: {
+      replaces: EDIT_REL_.replaces.map(function (x) { return x.fileId; }),
+      related: EDIT_REL_.related.map(function (x) { return x.fileId; })
+    }
   };
+  if (EDIT_KW_AUTO_) p.kwAuto = true;
+  else if (EDIT_KW_DIRTY_) p.keywords = EDIT_KW_.slice();
+  return p;
 }
 
 // Lưu thay đổi rồi chạy callback (dùng cho chế độ sửa liên tục). Không refresh để giữ nguyên thứ tự danh sách.
@@ -1042,9 +1224,8 @@ function openBatchEdit_() {
       '<label>Loại văn bản<select id="bType" class="input">' + typeOpts + '</select></label>' +
       '<label>Đơn vị ban hành<input id="bIssuer" class="input" list="issuerListBatch" placeholder="— Không đổi —"></label>' +
       '<label>Cấp ban hành<select id="bLevel" class="input">' + levelOpts + '</select></label>' +
-      '<label>Trạng thái xử lý<select id="bStatus" class="input">' + noChange_(STATE.statusOptions) + '</select></label>' +
-      '<label>Độ mật<select id="bSecurity" class="input">' + noChange_(STATE.securityOptions) + '</select></label>' +
-      '<label>Độ khẩn<select id="bUrgency" class="input">' + noChange_(STATE.urgencyOptions) + '</select></label>' +
+      '<label>Lĩnh vực<select id="bField" class="input">' + noChange_(STATE.fieldNames) + '</select></label>' +
+      '<label>Hiệu lực<select id="bValidity" class="input">' + noChange_(STATE.validityOptions) + '</select></label>' +
     '</div>' +
     '<div class="form-row" style="margin-top:14px">' +
       '<button class="btn btn-primary" id="btnBatchApply">Áp dụng cho ' + ids.length + ' văn bản</button>' +
@@ -1070,11 +1251,10 @@ function doBatchApply_(ids) {
     docTypeCode: $('#bType').value,
     issuer: $('#bIssuer').value.trim(),
     issuerLevel: $('#bLevel').value,
-    status: $('#bStatus').value,
-    security: $('#bSecurity').value,
-    urgency: $('#bUrgency').value
+    field: $('#bField').value,
+    validity: $('#bValidity').value
   };
-  var chosen = ['docTypeCode', 'issuer', 'issuerLevel', 'status', 'security', 'urgency']
+  var chosen = ['docTypeCode', 'issuer', 'issuerLevel', 'field', 'validity']
     .some(function (k) { return fields[k] !== ''; });
   if (!chosen) { toast('Hãy chọn ít nhất một trường để áp dụng.', 'err'); return; }
   showLoading(true, 'Đang áp dụng cho ' + ids.length + ' văn bản...');
@@ -1524,6 +1704,59 @@ function resetIssuers() {
     renderIssuersTable();
     showLoading(false);
     toast('Đã khôi phục danh mục mặc định.', 'ok');
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+
+/* ============ Lĩnh vực ============ */
+function renderFieldsTable() {
+  var t = $('#fieldsTable');
+  if (!t) return;
+  t.innerHTML =
+    '<tr><th style="width:220px">Tên lĩnh vực</th><th>Từ khoá (nhận diện tự động, cách nhau dấu phẩy)</th><th style="width:60px">Xoá</th></tr>';
+  (STATE.fields || []).forEach(function (f) { addFieldRowEl_(t, f); });
+}
+function addFieldRowEl_(table, f) {
+  var tr = el('tr');
+  tr.innerHTML =
+    '<td><input value="' + esc(f.field || '') + '" data-f="field"></td>' +
+    '<td><input value="' + esc((f.keywords || []).join(', ')) + '" data-f="keywords"></td>' +
+    '<td style="text-align:center"><button class="btn" data-del="1">×</button></td>';
+  tr.querySelector('[data-del]').addEventListener('click', function () { tr.remove(); });
+  table.appendChild(tr);
+}
+function addFieldRow() { addFieldRowEl_($('#fieldsTable'), { field: '', keywords: [] }); }
+function collectFields() {
+  var rows = $all('#fieldsTable tr');
+  var out = [];
+  rows.forEach(function (tr, i) {
+    if (i === 0) return;
+    var field = tr.querySelector('[data-f="field"]').value.trim();
+    var kw = tr.querySelector('[data-f="keywords"]').value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    if (field) out.push({ field: field, keywords: kw });
+  });
+  return out;
+}
+function saveFieldsUi() {
+  var fields = collectFields();
+  if (!fields.length) { toast('Cần ít nhất 1 lĩnh vực.', 'err'); return; }
+  showLoading(true, 'Đang lưu...');
+  call('saveFields', { fields: fields }).then(function (list) {
+    STATE.fields = list;
+    STATE.fieldNames = list.map(function (f) { return f.field; });
+    fillLevelSelect();
+    showLoading(false);
+    toast('Đã lưu danh mục lĩnh vực.', 'ok');
+  }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
+}
+function resetFieldsUi() {
+  showLoading(true, 'Đang khôi phục...');
+  call('resetFields').then(function (list) {
+    STATE.fields = list;
+    STATE.fieldNames = list.map(function (f) { return f.field; });
+    fillLevelSelect();
+    renderFieldsTable();
+    showLoading(false);
+    toast('Đã khôi phục danh mục lĩnh vực mặc định.', 'ok');
   }).catch(function (err) { showLoading(false); toast('Lỗi: ' + (err.message || err), 'err'); });
 }
 

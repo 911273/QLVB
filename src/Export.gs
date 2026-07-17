@@ -24,12 +24,12 @@ function exportDocsCsv_(query) {
   var res = searchDocs(query);
 
   var headers = ['STT', 'Số/Ký hiệu', 'Loại văn bản', 'Trích yếu', 'Ngày ban hành',
-    'Đơn vị ban hành', 'Cấp ban hành', 'Trạng thái', 'Độ mật', 'Độ khẩn', 'Tên file', 'Link Drive'];
+    'Đơn vị ban hành', 'Cấp ban hành', 'Lĩnh vực', 'Hiệu lực', 'Trạng thái xử lý', 'Tên file', 'Link Drive'];
   var lines = [headers.map(csvCell_).join(',')];
   res.items.forEach(function (d, i) {
     var row = [
       i + 1, d.docNumber, d.docType, d.title, csvDate_(d.issuedDate),
-      d.issuer, d.issuerLevel, d.status, d.security, d.urgency, d.fileName, d.fileUrl
+      d.issuer, d.issuerLevel, d.field, d.validity, d.procStatus, d.fileName, d.fileUrl
     ];
     lines.push(row.map(csvCell_).join(','));
   });

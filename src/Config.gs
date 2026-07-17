@@ -262,11 +262,46 @@ var ANALYZER_MAX_ENTITIES = 8;     // Số đối tượng/đơn vị lưu tối
 var ANALYZER_MAX_LEGALREFS = 10;   // Số căn cứ pháp lý/tiêu chuẩn lưu tối đa.
 var ANALYSIS_TEXT_LIMIT = 12000;   // Số ký tự nội dung dùng để phân tích (đủ đại diện, tránh chậm).
 
+var PROP_FIELDS = 'FIELDS_JSON'; // Danh mục Lĩnh vực tuỳ biến (JSON)
+
+// Các lựa chọn HIỆU LỰC của văn bản.
+function getValidityOptions() { return ['Còn hiệu lực', 'Hết hiệu lực', 'Chưa xác định']; }
+
+// Các nhãn TRẠNG THÁI XỬ LÝ (suy diễn) dùng cho bộ lọc tìm kiếm.
+function getProcessingStatuses() {
+  return ['Chưa OCR', 'Đang OCR', 'Lỗi OCR', 'File quá lớn', 'Chưa kiểm tra', 'Đã kiểm tra'];
+}
+
 /**
- * Từ điển LĨNH VỰC (không dấu, thường). Dùng để suy ra "lĩnh vực" của văn bản
- * theo số từ khoá khớp trong tiêu đề + nội dung + key phrases.
+ * Danh mục LĨNH VỰC hiện dùng (ưu tiên cấu hình tuỳ biến trong Cài đặt, else mặc định).
  */
 function getFieldDictionary() {
+  var raw = PropertiesService.getScriptProperties().getProperty(PROP_FIELDS);
+  if (raw) {
+    try {
+      var parsed = JSON.parse(raw);
+      if (parsed && parsed.length) return parsed;
+    } catch (e) { /* fallback về mặc định */ }
+  }
+  return getDefaultFields();
+}
+
+/** Danh sách TÊN lĩnh vực (cho dropdown / bộ lọc). */
+function getFieldNames() {
+  return getFieldDictionary().map(function (f) { return f.field; });
+}
+
+/** Lưu danh mục Lĩnh vực tuỳ biến. */
+function saveFields(fields) {
+  PropertiesService.getScriptProperties().setProperty(PROP_FIELDS, JSON.stringify(fields));
+  return getFieldDictionary();
+}
+
+/**
+ * Từ điển LĨNH VỰC mặc định (không dấu, thường). Dùng để suy ra "lĩnh vực" của văn bản
+ * theo số từ khoá khớp trong tiêu đề + nội dung + key phrases.
+ */
+function getDefaultFields() {
   return [
     { field: 'Đào tạo', keywords: ['dao tao', 'tin chi', 'hoc phan', 'tuyen sinh', 'chuong trinh dao tao', 'tot nghiep', 'giang day', 'hoc vu', 'thoi khoa bieu', 'do an', 'khoa luan'] },
     { field: 'Tổ chức - Cán bộ', keywords: ['to chuc can bo', 'nhan su', 'bo nhiem', 'vien chuc', 'tuyen dung', 'hop dong lam viec', 'dieu dong', 'thi dua khen thuong', 'ky luat'] },

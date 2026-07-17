@@ -144,11 +144,14 @@
             <label>Số/Ký hiệu
               <input type="text" id="sNumber" class="input" placeholder="VD: 510/QĐ">
             </label>
-            <label id="fStatus">Trạng thái
-              <select id="sStatus" class="input"></select>
+            <label>Lĩnh vực
+              <select id="sField" class="input"></select>
             </label>
-            <label id="fSecurity">Độ mật
-              <select id="sSecurity" class="input"></select>
+            <label>Hiệu lực
+              <select id="sValidity" class="input"></select>
+            </label>
+            <label>Trạng thái xử lý
+              <select id="sProc" class="input"></select>
             </label>
           </div>
           <div class="form-row">
@@ -344,6 +347,16 @@
             <button class="btn" id="btnAddIssuer">+ Thêm đơn vị</button>
             <button class="btn btn-primary" id="btnSaveIssuers">Lưu</button>
             <button class="btn" id="btnResetIssuers">Khôi phục mặc định</button>
+          </div>
+        </div>
+        <div class="card" id="cardFields">
+          <h3>Lĩnh vực nội dung</h3>
+          <p class="muted">Danh mục lĩnh vực dùng để tự động nhận diện lĩnh vực của văn bản (và làm bộ lọc). Từ khoá cách nhau bởi dấu phẩy.</p>
+          <table class="types-table" id="fieldsTable"></table>
+          <div class="form-row">
+            <button class="btn" id="btnAddField">+ Thêm lĩnh vực</button>
+            <button class="btn btn-primary" id="btnSaveFields">Lưu</button>
+            <button class="btn" id="btnResetFields">Khôi phục mặc định</button>
           </div>
         </div>
       </section>

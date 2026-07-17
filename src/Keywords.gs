@@ -150,3 +150,21 @@ function parseProfile_(str) {
 function computeKeywords_(text) {
   return profileToString_(extractKeyphrases_(text, ANALYZER_MAX_KEYPHRASES));
 }
+
+/**
+ * Chuẩn hoá danh sách key phrase do người dùng nhập tay (mảng hoặc chuỗi ngăn bởi dấu phẩy)
+ * thành chuỗi "cụm|trọng số" để lưu cột "Từ khóa". Khử trùng, giữ thứ tự, gán trọng số giảm dần.
+ */
+function sanitizeKeywords_(input) {
+  var arr = Array.isArray(input) ? input : String(input || '').split(',');
+  var seen = {}, out = [];
+  arr.forEach(function (s) {
+    s = String(s).trim();
+    var pos = s.lastIndexOf('|');
+    if (pos !== -1 && /^\d+$/.test(s.substring(pos + 1).trim())) s = s.substring(0, pos).trim(); // bỏ trọng số nếu có
+    if (!s) return;
+    var k = normalizeVi_(s);
+    if (k && !seen[k]) { seen[k] = 1; out.push(s); }
+  });
+  return out.map(function (t, i) { return t + '|' + Math.max(1, out.length - i); }).join(', ');
+}

@@ -102,6 +102,7 @@ var METHOD_PERM = {
   scan: 'scan', ocrQueueRun: 'scan', setOcrAuto: 'scan', setOcrLimit: 'scan', setAutoScan: 'scan',
   uploadFile: 'scan',
   saveDocTypes: 'config', resetDocTypes: 'config', saveIssuers: 'config', resetIssuers: 'config',
+  saveFields: 'config', resetFields: 'config',
   setVisionKey: 'config', testVision: 'config', initialize: 'config', logoInfo: 'config',
   getStorageConfig: 'config', setStorageFolder: 'config',
   listAccounts: 'accounts', saveAccount: 'accounts', deleteAccount: 'accounts', resetPassword: 'accounts',
@@ -111,7 +112,7 @@ var METHOD_PERM = {
 // Các thao tác cần ghi nhật ký hoạt động.
 var AUDIT_METHODS = {
   updateDoc: 1, updateDocsBatch: 1, deleteDoc: 1, restoreDoc: 1, purgeDoc: 1, emptyTrash: 1, reOcr: 1, scan: 1,
-  uploadFile: 1, saveDocTypes: 1, saveIssuers: 1, setVisionKey: 1, changePassword: 1,
+  uploadFile: 1, saveDocTypes: 1, saveIssuers: 1, saveFields: 1, setVisionKey: 1, changePassword: 1,
   saveAccount: 1, deleteAccount: 1, resetPassword: 1, initialize: 1,
   setAutoScan: 1, setOcrAuto: 1, setOcrLimit: 1, setStorageFolder: 1
 };
@@ -174,6 +175,8 @@ function routeMethod_(method, payload, acc) {
     case 'resetDocTypes': return apiResetDocTypes();
     case 'saveIssuers':  return saveIssuers(payload.issuers || payload);
     case 'resetIssuers': return apiResetIssuers();
+    case 'saveFields':   return saveFields(payload.fields || payload);
+    case 'resetFields':  return apiResetFields();
     case 'setVisionKey': return apiSetVisionKey(payload.key);
     case 'testVision':   return apiTestVision();
     case 'initialize':   return apiInitialize(acc);
@@ -236,9 +239,10 @@ function apiGetStatus(acc) {
     docTypes: getDocTypes(),
     issuers: getIssuers(),
     issuerLevels: getIssuerLevels(),
-    statusOptions: getStatusOptions(),
-    securityOptions: getSecurityOptions(),
-    urgencyOptions: getUrgencyOptions(),
+    fields: getFieldDictionary(),
+    fieldNames: getFieldNames(),
+    validityOptions: getValidityOptions(),
+    procStatusOptions: getProcessingStatuses(),
     totalDocs: countDocs_(),
     visionEnabled: hasVisionKey_(),
     ocrPending: ocrQueueCount(),
@@ -409,6 +413,14 @@ function apiSaveIssuers(issuers) {
 function apiResetIssuers() {
   PropertiesService.getScriptProperties().deleteProperty(PROP_ISSUERS);
   return getIssuers();
+}
+
+/**
+ * Đặt lại danh mục Lĩnh vực về mặc định.
+ */
+function apiResetFields() {
+  PropertiesService.getScriptProperties().deleteProperty(PROP_FIELDS);
+  return getFieldDictionary();
 }
 
 /**

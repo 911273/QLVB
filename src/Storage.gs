@@ -27,7 +27,10 @@ var COLS = {
   URGENCY: 19,       // Độ khẩn
   EDITED: 20,        // Đã sửa thông tin bằng tay (bảo vệ metadata, nhưng vẫn OCR nội dung)
   KEYWORDS: 21,      // 3–5 key phrase (cụm|trọng số) - hiển thị & hỗ trợ độ liên quan
-  ANALYSIS: 22       // Hồ sơ phân tích nội dung (JSON: topic/field/concepts/entities/legalRefs)
+  ANALYSIS: 22,      // Hồ sơ phân tích nội dung (JSON: topic/field/concepts/entities/legalRefs + cờ sửa tay)
+  FIELD: 23,         // Lĩnh vực (tự nhận diện hoặc sửa tay)
+  VALIDITY: 24,      // Hiệu lực: Còn hiệu lực / Hết hiệu lực / Chưa xác định
+  RELATIONS: 25      // Quan hệ văn bản (JSON: replaces/replacedBy/related - danh sách fileId)
 };
 
 var DB_HEADERS = [
@@ -35,7 +38,8 @@ var DB_HEADERS = [
   'Ngày ban hành', 'Trích yếu', 'Nội dung', 'Đường dẫn', 'MimeType',
   'Link Drive', 'Sửa lần cuối', 'Quét lúc', 'OCR',
   'Đơn vị ban hành', 'Cấp ban hành', 'OCR tiến độ',
-  'Trạng thái', 'Độ mật', 'Độ khẩn', 'Đã sửa', 'Từ khóa', 'Phân tích'
+  'Trạng thái', 'Độ mật', 'Độ khẩn', 'Đã sửa', 'Từ khóa', 'Phân tích',
+  'Lĩnh vực', 'Hiệu lực', 'Liên kết'
 ];
 
 /**
@@ -99,6 +103,7 @@ function getOrCreateDatabase() {
   migrateManualStatus_(ss); // dữ liệu cũ trạng thái 'manual' -> cờ đã sửa
   migrateKeywords_(ss);     // tính từ khóa cho văn bản cũ đã có nội dung (1 lần)
   migrateAnalysis_(ss);     // tính hồ sơ phân tích + key phrases mới cho văn bản cũ (1 lần)
+  migrateFieldValidity_(ss); // backfill cột Lĩnh vực (từ hồ sơ phân tích) + Hiệu lực mặc định (1 lần)
   _dbCache = ss;
   return ss;
 }
@@ -377,6 +382,50 @@ function migrateAnalysis_(ss) {
   } catch (e) { Logger.log('migrateAnalysis_ error: ' + e); }
 }
 
+/**
+ * Backfill cột "Lĩnh vực" (lấy từ hồ sơ phân tích đã có - KHÔNG tính lại) và đặt "Hiệu lực"
+ * mặc định cho văn bản cũ. Chạy MỘT LẦN, theo lô. Cần cột RELATIONS đã tồn tại.
+ */
+function migrateFieldValidity_(ss) {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('FIELDVAL_MIGRATED_V1')) return;
+  try {
+    var docs = ss.getSheetByName(DB_SHEET_DOCS);
+    var lastRow = docs.getLastRow();
+    if (lastRow < 2 || docs.getLastColumn() < COLS.RELATIONS + 1) {
+      props.setProperty('FIELDVAL_MIGRATED_V1', '1');
+      return;
+    }
+    var n = lastRow - 1;
+    var start = parseInt(props.getProperty('FIELDVAL_MIGRATE_CURSOR'), 10) || 0;
+    var count = Math.min(ANALYSIS_MIGRATE_BATCH, n - start);
+    if (count <= 0) {
+      props.setProperty('FIELDVAL_MIGRATED_V1', '1');
+      props.deleteProperty('FIELDVAL_MIGRATE_CURSOR');
+      return;
+    }
+    var anaCol = docs.getRange(2 + start, COLS.ANALYSIS + 1, count, 1).getValues();
+    var fieldCol = docs.getRange(2 + start, COLS.FIELD + 1, count, 1).getValues();
+    var valCol = docs.getRange(2 + start, COLS.VALIDITY + 1, count, 1).getValues();
+    for (var i = 0; i < count; i++) {
+      if (!String(fieldCol[i][0] || '').trim()) {
+        var a = parseAnalysis_(anaCol[i][0]);
+        fieldCol[i][0] = a.field || '';
+      }
+      if (!String(valCol[i][0] || '').trim()) valCol[i][0] = 'Chưa xác định';
+    }
+    docs.getRange(2 + start, COLS.FIELD + 1, count, 1).setValues(fieldCol);
+    docs.getRange(2 + start, COLS.VALIDITY + 1, count, 1).setValues(valCol);
+    var next = start + count;
+    if (next >= n) {
+      props.setProperty('FIELDVAL_MIGRATED_V1', '1');
+      props.deleteProperty('FIELDVAL_MIGRATE_CURSOR');
+    } else {
+      props.setProperty('FIELDVAL_MIGRATE_CURSOR', String(next));
+    }
+  } catch (e) { Logger.log('migrateFieldValidity_ error: ' + e); }
+}
+
 function getDocsSheet_() {
   return getOrCreateDatabase().getSheetByName(DB_SHEET_DOCS);
 }
@@ -449,8 +498,26 @@ function rowToObj_(r) {
     urgency: cell_(r[COLS.URGENCY]),
     edited: String(r[COLS.EDITED]).toUpperCase() === 'TRUE',
     keywords: cell_(r[COLS.KEYWORDS]),
-    analysis: cell_(r[COLS.ANALYSIS])
+    analysis: cell_(r[COLS.ANALYSIS]),
+    field: cell_(r[COLS.FIELD]),
+    validity: cell_(r[COLS.VALIDITY]) || 'Chưa xác định',
+    relations: cell_(r[COLS.RELATIONS]),
+    procStatus: processingStatus_(cell_(r[COLS.OCR_STATUS]), String(r[COLS.EDITED]).toUpperCase() === 'TRUE')
   };
+}
+
+/**
+ * Trạng thái xử lý SUY DIỄN từ trạng thái OCR + cờ đã kiểm tra (không lưu riêng).
+ */
+function processingStatus_(ocrStatus, edited) {
+  switch (ocrStatus) {
+    case 'pending': return 'Chưa OCR';
+    case 'partial': return 'Đang OCR';
+    case 'error': return 'Lỗi OCR';
+    case 'skip':
+    case 'skip-large': return 'File quá lớn';
+    default: return edited ? 'Đã kiểm tra' : 'Chưa kiểm tra'; // ok / ok-vision / manual
+  }
 }
 
 /**
@@ -514,6 +581,9 @@ function docToRow_(d) {
   row[COLS.EDITED] = d.edited ? 'TRUE' : '';
   row[COLS.KEYWORDS] = d.keywords || '';
   row[COLS.ANALYSIS] = d.analysis || '';
+  row[COLS.FIELD] = d.field || '';
+  row[COLS.VALIDITY] = d.validity || '';
+  row[COLS.RELATIONS] = d.relations || '';
   return row;
 }
 
@@ -575,13 +645,23 @@ function updateDocManual(p) {
   if (p.issuer != null) cur.issuer = String(p.issuer).trim();
   if (p.issuerLevel != null) cur.issuerLevel = String(p.issuerLevel).trim();
   if (p.status != null) cur.status = String(p.status).trim();
-  if (p.security != null) cur.security = String(p.security).trim();
-  if (p.urgency != null) cur.urgency = String(p.urgency).trim();
 
-  // Nội dung/tiêu đề/đơn vị thay đổi -> tính lại key phrases + hồ sơ phân tích để lưu tái sử dụng.
-  if (p.content != null || p.title != null || p.issuer != null) {
-    analyzeAndAttach_(cur);
+  // Lĩnh vực: '' = tự động (xoá cờ sửa tay); có giá trị = đặt tay.
+  if (p.field != null) {
+    if (String(p.field).trim() === '') { cur.fieldManual = false; }
+    else { cur.field = String(p.field).trim(); cur.fieldManual = true; }
   }
+  // Từ khóa: kwAuto = quay lại tự động; keywords (mảng/chuỗi) = đặt tay.
+  if (p.kwAuto) { cur.kwManual = false; }
+  else if (p.keywords != null) { cur.keywords = sanitizeKeywords_(p.keywords); cur.kwManual = true; }
+
+  if (p.validity != null) cur.validity = String(p.validity).trim();
+
+  // Quan hệ văn bản (2 chiều): replaces/related do người dùng đặt; replacedBy hệ thống tự quản lý.
+  if (p.relations != null) applyRelationsTwoWay_(cur, p.relations, existing);
+
+  // Luôn tính lại hồ sơ phân tích để đồng bộ Lĩnh vực + cờ sửa tay (giữ giá trị đặt tay).
+  analyzeAndAttach_(cur);
 
   // Đánh dấu đã sửa tay (bảo vệ metadata) NHƯNG giữ nguyên ocrStatus để vẫn tiếp tục OCR nội dung.
   cur.edited = true;
@@ -591,8 +671,75 @@ function updateDocManual(p) {
   return cur;
 }
 
+/* ===================== QUAN HỆ VĂN BẢN (2 chiều) ===================== */
+function parseRelations_(s) {
+  var empty = { replaces: [], replacedBy: [], related: [] };
+  if (!s) return empty;
+  try {
+    var o = JSON.parse(s);
+    return {
+      replaces: Array.isArray(o.replaces) ? o.replaces.map(String) : [],
+      replacedBy: Array.isArray(o.replacedBy) ? o.replacedBy.map(String) : [],
+      related: Array.isArray(o.related) ? o.related.map(String) : []
+    };
+  } catch (e) { return empty; }
+}
+function relationsToString_(o) {
+  try {
+    return JSON.stringify({ replaces: o.replaces || [], replacedBy: o.replacedBy || [], related: o.related || [] });
+  } catch (e) { return ''; }
+}
+function uniqStr_(arr) {
+  var seen = {}, out = [];
+  (arr || []).forEach(function (x) { x = String(x); if (x && !seen[x]) { seen[x] = 1; out.push(x); } });
+  return out;
+}
+function removeFrom_(arr, id) {
+  return (arr || []).filter(function (x) { return String(x) !== String(id); });
+}
+
+/**
+ * Đặt quan hệ cho văn bản `cur` và ĐỒNG BỘ 2 CHIỀU sang các văn bản đối tác.
+ * req: { replaces:[fileId], related:[fileId] }. replacedBy do hệ thống tự quản lý.
+ * Đặt A thay thế B => B nhận replacedBy=A và bị đặt "Hết hiệu lực".
+ */
+function applyRelationsTwoWay_(cur, req, existing) {
+  var prev = parseRelations_(cur.relations);
+  req = req || {};
+  var self = String(cur.fileId);
+  var newReplaces = uniqStr_(req.replaces).filter(function (id) { return id !== self; });
+  var newRelated = uniqStr_(req.related).filter(function (id) { return id !== self; });
+  cur.relations = relationsToString_({ replaces: newReplaces, replacedBy: prev.replacedBy, related: newRelated });
+
+  syncCounterparts_(self, prev.replaces, newReplaces, existing, 'replacedBy', true);
+  syncCounterparts_(self, prev.related, newRelated, existing, 'related', false);
+}
+
+function syncCounterparts_(selfId, oldList, newList, existing, counterKey, expire) {
+  var newSet = {}; (newList || []).forEach(function (x) { newSet[String(x)] = 1; });
+  var oldSet = {}; (oldList || []).forEach(function (x) { oldSet[String(x)] = 1; });
+  var added = (newList || []).filter(function (x) { return !oldSet[String(x)]; });
+  var removed = (oldList || []).filter(function (x) { return !newSet[String(x)]; });
+
+  added.forEach(function (id) {
+    var other = getDocDetailFast_(id); if (!other) return;
+    var rel = parseRelations_(other.relations);
+    rel[counterKey] = uniqStr_(rel[counterKey].concat([selfId]));
+    other.relations = relationsToString_(rel);
+    if (expire) other.validity = 'Hết hiệu lực';
+    upsertDoc_(other, existing);
+  });
+  removed.forEach(function (id) {
+    var other = getDocDetailFast_(id); if (!other) return;
+    var rel = parseRelations_(other.relations);
+    rel[counterKey] = removeFrom_(rel[counterKey], selfId);
+    other.relations = relationsToString_(rel);
+    upsertDoc_(other, existing); // không tự khôi phục hiệu lực (có thể do VB khác thay thế)
+  });
+}
+
 // Các trường được phép cập nhật hàng loạt (chỉ metadata chung, KHÔNG đụng nội dung/tiêu đề/số).
-var BATCH_FIELDS_ = ['docTypeCode', 'issuer', 'issuerLevel', 'status', 'security', 'urgency'];
+var BATCH_FIELDS_ = ['docTypeCode', 'issuer', 'issuerLevel', 'field', 'validity'];
 
 /**
  * Cập nhật CÙNG LÚC một tập trường chung cho nhiều văn bản (áp dụng hàng loạt).
@@ -621,7 +768,8 @@ function updateDocsBatch_(fileIds, fields) {
   fileIds.forEach(function (id) { want[String(id)] = true; });
 
   var typeName = apply.docTypeCode != null ? getTypeName_(apply.docTypeCode) : null;
-  var reanalyze = apply.issuer != null;           // đổi đơn vị -> tính lại key phrases + hồ sơ phân tích
+  // Đổi đơn vị hoặc đặt lĩnh vực -> tính lại hồ sơ phân tích (giữ lĩnh vực đặt tay).
+  var reanalyze = apply.issuer != null || apply.field != null;
   var nowIso = new Date().toISOString();
   var updated = 0;
 
@@ -630,16 +778,17 @@ function updateDocsBatch_(fileIds, fields) {
     if (apply.docTypeCode != null) { values[i][COLS.DOC_TYPE_CODE] = apply.docTypeCode; values[i][COLS.DOC_TYPE] = typeName; }
     if (apply.issuer != null) values[i][COLS.ISSUER] = apply.issuer;
     if (apply.issuerLevel != null) values[i][COLS.ISSUER_LEVEL] = apply.issuerLevel;
-    if (apply.status != null) values[i][COLS.STATUS] = apply.status;
-    if (apply.security != null) values[i][COLS.SECURITY] = apply.security;
-    if (apply.urgency != null) values[i][COLS.URGENCY] = apply.urgency;
+    if (apply.field != null) values[i][COLS.FIELD] = apply.field;
+    if (apply.validity != null) values[i][COLS.VALIDITY] = apply.validity;
     values[i][COLS.EDITED] = 'TRUE';               // bảo vệ metadata khỏi bị ghi đè khi quét lại
     values[i][COLS.SCANNED_AT] = nowIso;
     if (reanalyze) {
       var obj = rowToObj_(values[i]);
+      if (apply.field != null) obj.fieldManual = true; // giữ lĩnh vực đặt tay
       analyzeAndAttach_(obj);
       values[i][COLS.KEYWORDS] = obj.keywords || '';
       values[i][COLS.ANALYSIS] = obj.analysis || '';
+      values[i][COLS.FIELD] = obj.field || '';
     }
     // Ghi lại đúng dòng vừa sửa (giữ nguyên các dòng khác).
     sheet.getRange(i + 2, 1, 1, DB_HEADERS.length).setValues([values[i]]);

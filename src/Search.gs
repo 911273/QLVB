@@ -35,8 +35,9 @@ function searchDocs(query) {
     if (query.issuerLevel && d.issuerLevel !== query.issuerLevel) return false;
     if (issuerKw && normalizeVi_(d.issuer || '').indexOf(issuerKw) === -1) return false;
     if (numberKw && normalizeVi_(d.docNumber || '').indexOf(numberKw) === -1) return false;
-    if (query.status && d.status !== query.status) return false;
-    if (query.security && d.security !== query.security) return false;
+    if (query.field && d.field !== query.field) return false;
+    if (query.validity && (d.validity || 'Chưa xác định') !== query.validity) return false;
+    if (query.procStatus && d.procStatus !== query.procStatus) return false;
     if (query.fromDate && (!d.issuedDate || d.issuedDate < query.fromDate)) return false;
     if (query.toDate && (!d.issuedDate || d.issuedDate > query.toDate)) return false;
     if (terms.length) {
@@ -93,9 +94,9 @@ function searchDocs(query) {
       title: d.title,
       issuer: d.issuer,
       issuerLevel: d.issuerLevel,
-      status: d.status,
-      security: d.security,
-      urgency: d.urgency,
+      field: d.field,
+      validity: d.validity,
+      procStatus: d.procStatus,
       folderPath: d.folderPath,
       mimeType: d.mimeType,
       fileUrl: d.fileUrl,
@@ -206,6 +207,9 @@ function makeSnippet_(content, terms, phrase) {
  */
 function getDocDetail(fileId) {
   var d = getDocDetailFast_(fileId); // đọc đúng 1 dòng thay vì toàn bộ CSDL -> mở văn bản nhanh
-  if (d) d.analysisObj = parseAnalysis_(d.analysis);
+  if (d) {
+    d.analysisObj = parseAnalysis_(d.analysis);
+    d.relationsResolved = resolveRelations_(d.relations); // tiêu đề các văn bản liên kết cho UI
+  }
   return d;
 }
