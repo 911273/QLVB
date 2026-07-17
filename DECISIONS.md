@@ -66,3 +66,12 @@ Các module Scanner, Search, OCR
 không được biết Folder ID.
 
 Chỉ Storage Layer được phép truy cập cấu hình lưu trữ.
+## ADR-013
+
+Database Folder được cấu hình bởi Administrator.
+
+Không hardcode Folder ID trong source code.
+
+Hệ thống phải đọc Folder ID từ cấu hình.
+
+Scanner, OCR, Search và Storage không tự lưu hoặc hardcode Folder ID.
