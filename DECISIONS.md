@@ -41,3 +41,28 @@ nếu không được yêu cầu.
 ADR-006
 
 Không hardcode Folder ID.
+# ADR-010
+
+Database Location
+
+Không được hardcode trong source.
+
+Phải lưu dưới dạng cấu hình.
+
+---
+
+# ADR-011
+
+Mọi thao tác thay đổi Database Location
+
+phải kiểm tra quyền Administrator.
+
+---
+
+# ADR-012
+
+Các module Scanner, Search, OCR
+
+không được biết Folder ID.
+
+Chỉ Storage Layer được phép truy cập cấu hình lưu trữ.
