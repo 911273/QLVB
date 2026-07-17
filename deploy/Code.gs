@@ -900,6 +900,64 @@ function updateDocManual(p) {
   return cur;
 }
 
+// Các trường được phép cập nhật hàng loạt (chỉ metadata chung, KHÔNG đụng nội dung/tiêu đề/số).
+var BATCH_FIELDS_ = ['docTypeCode', 'issuer', 'issuerLevel', 'status', 'security', 'urgency'];
+
+/**
+ * Cập nhật CÙNG LÚC một tập trường chung cho nhiều văn bản (áp dụng hàng loạt).
+ * Đọc sheet 1 lần, sửa trong bộ nhớ, chỉ ghi lại các dòng thay đổi -> tiết kiệm quota.
+ * @param {string[]} fileIds Danh sách mã văn bản cần áp dụng.
+ * @param {Object} fields Các trường chung: {docTypeCode?, issuer?, issuerLevel?, status?, security?, urgency?}.
+ *   Chỉ trường có giá trị (khác rỗng) mới được áp dụng; trường không truyền/rỗng được bỏ qua.
+ * @return {{updated: number, requested: number}} Số văn bản đã cập nhật / số yêu cầu.
+ */
+function updateDocsBatch_(fileIds, fields) {
+  if (!fileIds || !fileIds.length) throw new Error('Chưa chọn văn bản nào.');
+  fields = fields || {};
+  var apply = {};
+  BATCH_FIELDS_.forEach(function (k) {
+    if (fields[k] != null && String(fields[k]).trim() !== '') apply[k] = String(fields[k]).trim();
+  });
+  if (!Object.keys(apply).length) throw new Error('Chưa chọn trường nào để áp dụng.');
+
+  var sheet = getDocsSheet_();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { updated: 0, requested: fileIds.length };
+  var n = lastRow - 1;
+  var values = sheet.getRange(2, 1, n, DB_HEADERS.length).getValues();
+
+  var want = {};
+  fileIds.forEach(function (id) { want[String(id)] = true; });
+
+  var typeName = apply.docTypeCode != null ? getTypeName_(apply.docTypeCode) : null;
+  var reanalyze = apply.issuer != null;           // đổi đơn vị -> tính lại key phrases + hồ sơ phân tích
+  var nowIso = new Date().toISOString();
+  var updated = 0;
+
+  for (var i = 0; i < n; i++) {
+    if (!want[String(values[i][COLS.FILE_ID])]) continue;
+    if (apply.docTypeCode != null) { values[i][COLS.DOC_TYPE_CODE] = apply.docTypeCode; values[i][COLS.DOC_TYPE] = typeName; }
+    if (apply.issuer != null) values[i][COLS.ISSUER] = apply.issuer;
+    if (apply.issuerLevel != null) values[i][COLS.ISSUER_LEVEL] = apply.issuerLevel;
+    if (apply.status != null) values[i][COLS.STATUS] = apply.status;
+    if (apply.security != null) values[i][COLS.SECURITY] = apply.security;
+    if (apply.urgency != null) values[i][COLS.URGENCY] = apply.urgency;
+    values[i][COLS.EDITED] = 'TRUE';               // bảo vệ metadata khỏi bị ghi đè khi quét lại
+    values[i][COLS.SCANNED_AT] = nowIso;
+    if (reanalyze) {
+      var obj = rowToObj_(values[i]);
+      analyzeAndAttach_(obj);
+      values[i][COLS.KEYWORDS] = obj.keywords || '';
+      values[i][COLS.ANALYSIS] = obj.analysis || '';
+    }
+    // Ghi lại đúng dòng vừa sửa (giữ nguyên các dòng khác).
+    sheet.getRange(i + 2, 1, 1, DB_HEADERS.length).setValues([values[i]]);
+    updated++;
+  }
+  writeLog_('Sửa hàng loạt', updated, updated + '/' + fileIds.length + ' văn bản');
+  return { updated: updated, requested: fileIds.length };
+}
+
 /**
  * Xoá 1 văn bản khỏi hệ thống: gỡ dòng trong CSDL, và (mặc định) chuyển file
  * trên Drive vào thùng rác để lần quét sau không thêm lại. File vẫn khôi phục được từ Thùng rác Drive.
@@ -2837,6 +2895,7 @@ function auditLog_(email, method, detail) {
 // Tạo mô tả ngắn cho log từ payload của phương thức.
 function auditDetail_(method, payload) {
   payload = payload || {};
+  if (method === 'updateDocsBatch') return (payload.fileIds ? payload.fileIds.length : 0) + ' văn bản';
   if (payload.fileId) return 'fileId: ' + payload.fileId;
   if (payload.email) return payload.email;
   if (method === 'scan') return payload.force ? 'quét lại toàn bộ' : 'quét thường';
@@ -3332,7 +3391,7 @@ var METHOD_PERM = {
   getStatus: null, changePassword: null, logout: null,
   search: 'view', getDetail: 'view', getStats: 'view', getUploadInfo: 'view', findDuplicates: 'view',
   exportCsv: 'view', getRelated: 'view',
-  updateDoc: 'edit', reOcr: 'edit', deleteDoc: 'delete',
+  updateDoc: 'edit', updateDocsBatch: 'edit', reOcr: 'edit', deleteDoc: 'delete',
   listTrash: 'delete', restoreDoc: 'delete', purgeDoc: 'delete', emptyTrash: 'delete',
   scan: 'scan', ocrQueueRun: 'scan', setOcrAuto: 'scan', setOcrLimit: 'scan', setAutoScan: 'scan',
   uploadFile: 'scan',
@@ -3345,7 +3404,7 @@ var METHOD_PERM = {
 
 // Các thao tác cần ghi nhật ký hoạt động.
 var AUDIT_METHODS = {
-  updateDoc: 1, deleteDoc: 1, restoreDoc: 1, purgeDoc: 1, emptyTrash: 1, reOcr: 1, scan: 1,
+  updateDoc: 1, updateDocsBatch: 1, deleteDoc: 1, restoreDoc: 1, purgeDoc: 1, emptyTrash: 1, reOcr: 1, scan: 1,
   uploadFile: 1, saveDocTypes: 1, saveIssuers: 1, setVisionKey: 1, changePassword: 1,
   saveAccount: 1, deleteAccount: 1, resetPassword: 1, initialize: 1,
   setAutoScan: 1, setOcrAuto: 1, setOcrLimit: 1, setStorageFolder: 1
@@ -3393,6 +3452,7 @@ function routeMethod_(method, payload, acc) {
     case 'findDuplicates': return findDuplicates();
     case 'getUploadInfo': return apiGetUploadInfo();
     case 'updateDoc':    return updateDocManual(payload);
+    case 'updateDocsBatch': return updateDocsBatch_(payload.fileIds, payload.fields);
     case 'reOcr':        return reOcrDoc(payload.fileId);
     case 'deleteDoc':    return deleteDocToTrash_(payload.fileId, acc.email);
     case 'listTrash':    return listTrash_();
