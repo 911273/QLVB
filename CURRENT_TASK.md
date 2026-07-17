@@ -108,3 +108,11 @@ Stylesheet.html
 ✓ Người dùng thường không nhìn thấy chức năng này.
 
 ✓ Hệ thống tiếp tục hoạt động với Folder mới.
+
+## Migration
+
+Khi Administrator đổi Database Folder:
+
+- Không tự động di chuyển dữ liệu cũ.
+- Chỉ cập nhật cấu hình sử dụng Folder mới.
+- Dữ liệu trong Folder cũ vẫn được giữ nguyên.
