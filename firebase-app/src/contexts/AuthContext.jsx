@@ -5,6 +5,8 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
+  reauthenticateWithPopup,
+  linkWithPopup,
   GoogleAuthProvider,
   RecaptchaVerifier,
   signInWithPhoneNumber,
@@ -47,7 +49,27 @@ export function AuthProvider({ children }) {
     requestCalendarToken: async () => {
       const provider = new GoogleAuthProvider();
       provider.addScope('https://www.googleapis.com/auth/calendar.events');
-      const result = await signInWithPopup(auth, provider);
+      const current = auth.currentUser;
+      let result;
+      if (current) {
+        // GIỮ NGUYÊN tài khoản hiện tại: không dùng signInWithPopup (sẽ đổi phiên
+        // sang tài khoản Google khác -> mất dữ liệu theo uid cũ). Nếu đã có Google
+        // thì reauthenticate; nếu là email/phone thì link Google vào chính uid này.
+        const hasGoogle = current.providerData.some((p) => p.providerId === 'google.com');
+        try {
+          result = hasGoogle
+            ? await reauthenticateWithPopup(current, provider)
+            : await linkWithPopup(current, provider);
+        } catch (e) {
+          if (e.code === 'auth/provider-already-linked' || e.code === 'auth/credential-already-in-use') {
+            result = await reauthenticateWithPopup(current, provider);
+          } else {
+            throw e;
+          }
+        }
+      } else {
+        result = await signInWithPopup(auth, provider);
+      }
       const cred = GoogleAuthProvider.credentialFromResult(result);
       return cred ? cred.accessToken : undefined;
     },

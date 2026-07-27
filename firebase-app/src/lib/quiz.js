@@ -79,16 +79,21 @@ export function parseWordParagraphs(paras) {
     if (!cur) return;
     const opts = cur.options;
     if (opts.length >= 2) {
+      // Ưu tiên marker tường minh ([<$>]/[$]/*). Nếu không có, chỉ dùng in đậm
+      // khi CÓ ĐÚNG MỘT đáp án đậm (nhiều/không có -> không đoán, báo lỗi để
+      // tránh tạo đáp án sai âm thầm).
       const hasExplicit = opts.some((o) => o.explicit);
-      let assigned = false;
-      const finalOpts = opts.map((o) => {
-        let correct = hasExplicit ? o.explicit : o.emph;
-        if (correct && assigned) correct = false; // chỉ 1 đáp án đúng
-        if (correct) assigned = true;
-        return { text: o.text.trim(), correct };
-      });
-      if (assigned) questions.push({ id: 'qw' + Date.now() + '_' + (seq++), stem: cur.stem.trim(), options: finalOpts, diff: '', chapter: '' });
-      else errors.push(`"${cur.stem.slice(0, 28)}…": chưa xác định được đáp án đúng.`);
+      const emphCount = opts.filter((o) => o.emph).length;
+      const useEmph = !hasExplicit && emphCount === 1;
+      if (hasExplicit || useEmph) {
+        const finalOpts = opts.map((o) => ({
+          text: o.text.trim(),
+          correct: hasExplicit ? o.explicit : o.emph,
+        }));
+        questions.push({ id: 'qw' + Date.now() + '_' + (seq++), stem: cur.stem.trim(), options: finalOpts, diff: '', chapter: '' });
+      } else {
+        errors.push(`"${cur.stem.slice(0, 28)}…": chưa xác định được đáp án đúng (đánh dấu [<$>], * hoặc in đậm 1 đáp án).`);
+      }
     } else if (cur.stem) {
       errors.push(`"${cur.stem.slice(0, 28)}…": thiếu đáp án.`);
     }

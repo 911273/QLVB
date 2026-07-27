@@ -17,13 +17,25 @@ function download(name, content, mime) {
   URL.revokeObjectURL(url);
 }
 
-// Chuyển HTML (từ mammoth) -> danh sách đoạn văn + cờ đậm/gạch chân.
+// Bỏ phần nhãn "A."/"(A)"/"[<$>]" ở đầu để xét phần NỘI DUNG đáp án.
+function stripOptLabel(s) {
+  return String(s || '').replace(/^\s*(\[\s*<?\s*\$\s*>?\s*\]\s*)?[-•●▪]?\s*(?:\([A-Ha-h]\)|[A-Ha-h][.)])\s*/, '');
+}
+
+// Chuyển HTML (từ mammoth) -> đoạn văn + cờ in đậm/gạch chân THỰC SỰ trên phần
+// nội dung (không tính khi chỉ nhãn "A." được in đậm — tránh chọn nhầm đáp án).
 function htmlToParagraphs(html) {
   const docp = new DOMParser().parseFromString(html, 'text/html');
-  return [...docp.body.querySelectorAll('p, li')].map((p) => ({
-    text: p.textContent || '',
-    emphasized: !!p.querySelector('strong, b, u'),
-  }));
+  return [...docp.body.querySelectorAll('p, li')].map((p) => {
+    const full = (p.textContent || '').trim();
+    let emphText = '';
+    p.querySelectorAll('strong, b, u').forEach((el) => { emphText += el.textContent || ''; });
+    const fullBody = stripOptLabel(full);
+    const emphBody = stripOptLabel(emphText.trim());
+    // In đậm được coi là "đánh dấu đáp án" khi phủ >= 50% nội dung (bỏ nhãn).
+    const emphasized = fullBody.length > 0 && emphBody.length >= Math.max(3, fullBody.length * 0.5);
+    return { text: full, emphasized };
+  });
 }
 
 function escapeHtml(s) {

@@ -67,6 +67,17 @@ export function parseWeekList(s) {
     t = t.replace(/,/g, '').replace(/;/g, '');
   }
 
+  // Range thuần "n-m" (vd "1-16") -> tuần n..m. Xét trước parser theo vị trí,
+  // vì chuỗi vị trí luôn có nhiều dấu '-' (vd "-2---...") nên không trùng mẫu này.
+  const range = t.match(/^(\d+)\s*-\s*(\d+)$/);
+  if (range) {
+    let a = parseInt(range[1], 10), b = parseInt(range[2], 10);
+    if (a > b) [a, b] = [b, a];
+    const out = [];
+    for (let w = a; w <= b; w++) out.push(w);
+    return out;
+  }
+
   const weeks2 = [];
   let weekIdx = 0;
   for (const ch of t) {
