@@ -1,16 +1,36 @@
-// Module QLVB (quản lý văn bản) - khung, sẵn sàng mở rộng với Firestore.
-import Placeholder from '../components/Placeholder.jsx';
+// Module Quản lý văn bản: nhúng Web App QLVB (Google Apps Script) qua iframe.
+// Trang QLVB đã bật XFrameOptionsMode.ALLOWALL nên cho phép nhúng.
+import { useState } from 'react';
+import { QLVB_EXEC_URL } from '../config.js';
 
 export default function Documents() {
+  const [loading, setLoading] = useState(true);
+
   return (
-    <Placeholder icon="📄" title="Quản lý văn bản">
-      <p>Module này sẽ quản lý văn bản: tải lên, phân loại, tìm kiếm.</p>
-      <ul>
-        <li>Dữ liệu lưu ở collection <code>documents</code> (Firestore).</li>
-        <li>Cần bổ sung Firebase Storage nếu muốn lưu file gốc (PDF, ảnh).</li>
-        <li>OCR/phân loại AI nên đặt ở Cloud Functions (cần gói Blaze).</li>
-      </ul>
-      <p className="muted">Cho mình biết chi tiết chức năng để triển khai đầy đủ.</p>
-    </Placeholder>
+    <div className="doc-page">
+      <div className="doc-header">
+        <h1>📄 Quản lý văn bản</h1>
+        <a
+          className="btn btn-google"
+          href={QLVB_EXEC_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Mở trong tab mới ↗
+        </a>
+      </div>
+
+      <div className="doc-frame-wrap">
+        {loading && <div className="doc-frame-loading">Đang tải QLVB…</div>}
+        <iframe
+          title="QLVB - Quản lý văn bản"
+          src={QLVB_EXEC_URL}
+          className="doc-frame"
+          onLoad={() => setLoading(false)}
+          // Cho phép các tính năng QLVB cần (mở popup Drive, tải file...).
+          allow="clipboard-read; clipboard-write"
+        />
+      </div>
+    </div>
   );
 }
