@@ -1,0 +1,36 @@
+rules_version = '2';
+
+// Bảo mật: mỗi người dùng chỉ đọc/ghi được dữ liệu của chính mình.
+// Mọi document phải có field `uid` = uid của chủ sở hữu.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: đã đăng nhập chưa
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Helper: uid trên document trùng với người đang đăng nhập
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Các collection dữ liệu cá nhân dùng chung một quy tắc:
+    // tasks (tiến độ công việc), documents (QLVB), quizzes (trộn đề),
+    // grades (bảng điểm). Mỗi doc mang field `uid`.
+    match /{collection}/{docId} {
+      allow read: if resource.data.uid == request.auth.uid;
+      // Khi tạo mới: uid trong dữ liệu phải là chính mình
+      allow create: if isOwner(request.resource.data.uid);
+      // Khi sửa/xóa: phải là chủ doc hiện tại và không đổi uid
+      allow update: if isOwner(resource.data.uid)
+                    && request.resource.data.uid == resource.data.uid;
+      allow delete: if isOwner(resource.data.uid);
+    }
+
+    // Mặc định: chặn tất cả những gì không khớp quy tắc trên.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
