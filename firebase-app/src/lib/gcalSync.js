@@ -28,19 +28,37 @@ function eventBody(s) {
   };
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Gọi API có tự động thử lại khi bị giới hạn tốc độ (403 rateLimitExceeded /
+// 429 / 5xx) với exponential backoff. 403 do thiếu quyền thì KHÔNG thử lại.
+async function apiFetch(url, opts, maxRetries = 6) {
+  let delay = 800;
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, opts);
+    if (res.ok || res.status === 409) return res;
+
+    let retriable = res.status === 429 || res.status >= 500;
+    if (res.status === 403) {
+      const body = await res.clone().text().catch(() => '');
+      retriable = /rateLimitExceeded|userRateLimitExceeded|quotaExceeded|backendError/i.test(body);
+    }
+    if (retriable && attempt < maxRetries) {
+      await sleep(delay + Math.random() * 400);
+      delay = Math.min(delay * 2, 16000);
+      continue;
+    }
+    return res;
+  }
+}
+
 async function upsertOne(body, token) {
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const payload = JSON.stringify(body);
   // Thử tạo mới; nếu đã tồn tại (409) thì cập nhật.
-  let res = await fetch(API, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  let res = await apiFetch(API, { method: 'POST', headers, body: payload });
   if (res.status === 409) {
-    res = await fetch(`${API}/${body.id}`, {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    res = await apiFetch(`${API}/${body.id}`, { method: 'PUT', headers, body: payload });
     if (res.ok) return 'updated';
   } else if (res.ok) {
     return 'added';
@@ -59,7 +77,9 @@ async function upsertOne(body, token) {
 export async function syncToGoogleCalendar(sessions, token, onProgress) {
   const result = { added: 0, updated: 0, failed: 0, errors: [] };
   let done = 0;
-  const CONCURRENCY = 5;
+  // Ít luồng để tránh vượt giới hạn tốc độ ghi của Google Calendar; kết hợp
+  // backoff trong apiFetch để hoàn tất mà không lỗi rate limit.
+  const CONCURRENCY = 2;
   const queue = sessions.slice();
 
   async function worker() {
@@ -76,6 +96,7 @@ export async function syncToGoogleCalendar(sessions, token, onProgress) {
         done++;
         if (onProgress) onProgress(done, sessions.length);
       }
+      await sleep(120); // giãn nhịp để tránh dồn request
     }
   }
 
