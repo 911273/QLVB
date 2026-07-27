@@ -58,6 +58,68 @@ export function parseQuestions(text) {
   return { questions, errors };
 }
 
+const WORD_HEADER = /^\s*Câu\s*\d+\s*[:.\-]?\s*(?:\[\s*<[^>]*>\s*\])?\s*(.*)$/i;
+// Nhãn đáp án; marker [<$>]/[$] hoặc * ở đầu = đáp án đúng (quy ước Midx).
+const WORD_OPT = /^\s*(\[\s*<?\s*\$\s*>?\s*\]\s*)?(\*?)\s*[-•●▪]?\s*(?:\(([A-Ha-h])\)|([A-Ha-h])[.)])\s*(.+)$/;
+
+/**
+ * Phân tích câu hỏi từ các đoạn văn Word (đã trích).
+ * @param {Array<{text:string, emphasized?:boolean}>} paras đoạn văn + cờ đậm/gạch chân.
+ * Đáp án đúng nhận diện qua: marker [<$>]/[$] hoặc * ; nếu không có thì lấy
+ * đáp án được in đậm/gạch chân (định dạng Word).
+ * @returns {{questions:Array, errors:string[]}}
+ */
+export function parseWordParagraphs(paras) {
+  const questions = [];
+  const errors = [];
+  let cur = null;
+  let seq = 0;
+
+  const flush = () => {
+    if (!cur) return;
+    const opts = cur.options;
+    if (opts.length >= 2) {
+      const hasExplicit = opts.some((o) => o.explicit);
+      let assigned = false;
+      const finalOpts = opts.map((o) => {
+        let correct = hasExplicit ? o.explicit : o.emph;
+        if (correct && assigned) correct = false; // chỉ 1 đáp án đúng
+        if (correct) assigned = true;
+        return { text: o.text.trim(), correct };
+      });
+      if (assigned) questions.push({ id: 'qw' + Date.now() + '_' + (seq++), stem: cur.stem.trim(), options: finalOpts, diff: '', chapter: '' });
+      else errors.push(`"${cur.stem.slice(0, 28)}…": chưa xác định được đáp án đúng.`);
+    } else if (cur.stem) {
+      errors.push(`"${cur.stem.slice(0, 28)}…": thiếu đáp án.`);
+    }
+    cur = null;
+  };
+
+  for (const p of paras) {
+    const line = (p.text || '').replace(/\s+/g, ' ').trim();
+    if (!line) continue;
+    const h = line.match(WORD_HEADER);
+    if (h && !WORD_OPT.test(line)) {
+      flush();
+      cur = { stem: h[1] || '', options: [] };
+      continue;
+    }
+    const m = line.match(WORD_OPT);
+    if (m && cur) {
+      cur.options.push({
+        text: m[5],
+        explicit: !!(m[1] || m[2]),
+        emph: !!p.emphasized,
+      });
+    } else if (cur) {
+      if (cur.options.length) cur.options[cur.options.length - 1].text += ' ' + line;
+      else cur.stem += (cur.stem ? ' ' : '') + line;
+    }
+  }
+  flush();
+  return { questions, errors };
+}
+
 /**
  * Sinh danh sách mã đề. Mỗi mã đề: trộn thứ tự câu + (tùy chọn) trộn đáp án,
  * ghi lại đáp án đúng theo vị trí (giống bảng variant_questions của Midx).

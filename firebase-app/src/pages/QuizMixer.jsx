@@ -5,7 +5,7 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import {
-  parseQuestions, makeVariants, gradeOne, answerKeyCsv, resultsCsv, parseStudentRows, LABELS,
+  parseQuestions, parseWordParagraphs, makeVariants, gradeOne, answerKeyCsv, resultsCsv, parseStudentRows, LABELS,
 } from '../lib/quiz.js';
 
 function download(name, content, mime) {
@@ -15,6 +15,19 @@ function download(name, content, mime) {
   a.href = url; a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
+}
+
+// Chuyển HTML (từ mammoth) -> danh sách đoạn văn + cờ đậm/gạch chân.
+function htmlToParagraphs(html) {
+  const docp = new DOMParser().parseFromString(html, 'text/html');
+  return [...docp.body.querySelectorAll('p, li')].map((p) => ({
+    text: p.textContent || '',
+    emphasized: !!p.querySelector('strong, b, u'),
+  }));
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
 export default function QuizMixer() {
@@ -80,6 +93,7 @@ export default function QuizMixer() {
 function BankTab({ questions, updateQuestions, saveState }) {
   const [text, setText] = useState('');
   const [msg, setMsg] = useState('');
+  const [wordBusy, setWordBusy] = useState(false);
 
   function importText() {
     const { questions: parsed, errors } = parseQuestions(text);
@@ -88,11 +102,43 @@ function BankTab({ questions, updateQuestions, saveState }) {
     setText('');
     setMsg(`Đã thêm ${parsed.length} câu.` + (errors.length ? ` (${errors.length} câu lỗi bị bỏ qua)` : ''));
   }
+
+  async function importWord(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setWordBusy(true);
+    setMsg('Đang đọc file Word…');
+    try {
+      const mammoth = await import('mammoth');
+      const buf = await file.arrayBuffer();
+      const { value: html } = await mammoth.convertToHtml({ arrayBuffer: buf });
+      const paras = htmlToParagraphs(html);
+      const { questions: parsed, errors } = parseWordParagraphs(paras);
+      if (!parsed.length) { setMsg('Không nhận được câu hỏi nào từ Word. ' + (errors[0] || 'Kiểm tra định dạng "Câu 1", "A.", đánh dấu đáp án đúng.')); return; }
+      updateQuestions([...questions, ...parsed]);
+      setMsg(`Đã import ${parsed.length} câu từ Word.` + (errors.length ? ` (${errors.length} câu bỏ qua)` : ''));
+    } catch (err) {
+      setMsg('Lỗi đọc Word: ' + (err?.message || err));
+    } finally {
+      setWordBusy(false);
+      e.target.value = '';
+    }
+  }
   function removeQ(id) { updateQuestions(questions.filter((q) => q.id !== id)); }
   function clearAll() { if (confirm('Xóa toàn bộ ngân hàng câu hỏi?')) updateQuestions([]); }
 
   return (
     <div>
+      <div className="card" style={{ marginBottom: '1rem' }}>
+        <strong>📄 Import từ file Word (.docx)</strong>
+        <p className="muted" style={{ margin: '0.4rem 0' }}>
+          Định dạng: mỗi câu bắt đầu bằng <code>Câu 1</code>, đáp án <code>A.</code> <code>B.</code>…
+          Đánh dấu đáp án đúng bằng <code>[&lt;$&gt;]</code> hoặc <code>*</code> ở đầu, hoặc <strong>in đậm/gạch chân</strong> đáp án đúng.
+        </p>
+        <input type="file" accept=".docx" onChange={importWord} disabled={wordBusy} />
+        {wordBusy && <span className="muted"> Đang xử lý…</span>}
+      </div>
+
       <div className="card">
         <strong>Nhập câu hỏi (dán hàng loạt)</strong>
         <p className="muted" style={{ margin: '0.4rem 0' }}>
@@ -146,6 +192,7 @@ function MixTab({ questions, variants, setVariants, download }) {
   const [shuffleAnswers, setShuffleAnswers] = useState(true);
   const [startCode, setStartCode] = useState(101);
   const [preview, setPreview] = useState(0);
+  const [examTitle, setExamTitle] = useState('ĐỀ THI TRẮC NGHIỆM');
 
   function generate() {
     const nv = Math.max(1, Number(numVariants) || 1);
@@ -170,12 +217,60 @@ function MixTab({ questions, variants, setVariants, download }) {
     download('DeThi.txt', lines.join('\n'), 'text/plain;charset=utf-8');
   }
 
+  // Xuất PDF qua in trình duyệt (hỗ trợ tiếng Việt hoàn hảo, chọn "Lưu thành PDF").
+  function exportPdf() {
+    const esc = escapeHtml;
+    let body = '';
+    variants.forEach((v) => {
+      body += `<section class="exam"><h2>${esc(examTitle)}</h2><div class="code">Mã đề: <b>${v.code}</b></div>`;
+      body += `<div class="meta">Họ tên: ...................................... &nbsp;&nbsp; Lớp: ............... &nbsp;&nbsp; MSSV: ...............</div>`;
+      v.items.forEach((it) => {
+        body += `<div class="q"><div class="stem"><b>Câu ${it.position}.</b> ${esc(it.stem)}</div><div class="opts">`;
+        it.options.forEach((o, i) => { body += `<div class="opt"><b>${LABELS[i]}.</b> ${esc(o)}</div>`; });
+        body += `</div></div>`;
+      });
+      body += `</section>`;
+    });
+    // Trang đáp án ở cuối.
+    body += `<section class="exam keypage"><h2>ĐÁP ÁN</h2>`;
+    variants.forEach((v) => {
+      body += `<div class="keyrow"><b>Mã ${v.code}:</b> ${v.key.map((k, i) => `${i + 1}${k}`).join(' &nbsp; ')}</div>`;
+    });
+    body += `</section>`;
+
+    const html = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>${esc(examTitle)}</title>
+<style>
+@page{size:A4;margin:15mm}
+body{font-family:'Times New Roman',serif;font-size:13pt;line-height:1.45;color:#000}
+.exam{page-break-after:always}
+.keypage{page-break-after:auto}
+h2{text-align:center;font-size:15pt;margin:0 0 4pt}
+.code{text-align:center;margin-bottom:8pt}
+.meta{margin-bottom:10pt;font-style:italic}
+.q{margin-bottom:8pt}
+.stem{margin-bottom:2pt}
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:2pt 16pt;padding-left:12pt}
+.keyrow{margin-bottom:6pt}
+@media print{button{display:none}}
+</style></head><body>${body}</body></html>`;
+
+    const w = window.open('', '_blank');
+    if (!w) { alert('Trình duyệt chặn cửa sổ in. Hãy cho phép popup rồi thử lại.'); return; }
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 500);
+  }
+
   if (!questions.length) return <div className="hint-box">Ngân hàng đang trống. Hãy thêm câu hỏi ở tab <strong>Ngân hàng</strong>.</div>;
 
   const v = variants[preview];
   return (
     <div>
       <div className="card">
+        <label className="sched-field" style={{ marginBottom: '0.75rem' }}>Tiêu đề đề thi (cho PDF)
+          <input type="text" value={examTitle} onChange={(e) => setExamTitle(e.target.value)} />
+        </label>
         <div className="sched-row">
           <label className="sched-field sched-offset">Số câu / đề (0 = tất cả)
             <input type="number" min="0" value={numQuestions} onChange={(e) => setNumQuestions(e.target.value)} placeholder={String(questions.length)} />
@@ -193,6 +288,7 @@ function MixTab({ questions, variants, setVariants, download }) {
         <div className="sched-actions">
           <button className="btn btn-primary" onClick={generate}>Sinh mã đề</button>
           {variants.length > 0 && <>
+            <button className="btn btn-primary" onClick={exportPdf}>📄 Xuất PDF</button>
             <button className="btn btn-google" onClick={exportExamText}>Xuất đề (.txt)</button>
             <button className="btn btn-google" onClick={() => download('DapAn.csv', answerKeyCsv(variants), 'text/csv;charset=utf-8')}>Xuất đáp án (CSV)</button>
           </>}
