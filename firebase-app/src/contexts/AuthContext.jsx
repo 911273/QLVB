@@ -6,6 +6,8 @@ import {
   createUserWithEmailAndPassword,
   signInWithPopup,
   GoogleAuthProvider,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
   signOut,
 } from 'firebase/auth';
 import { auth } from '../firebase.js';
@@ -36,6 +38,24 @@ export function AuthProvider({ children }) {
     loginEmail: (email, password) => signInWithEmailAndPassword(auth, email, password),
     registerEmail: (email, password) => createUserWithEmailAndPassword(auth, email, password),
     loginGoogle: () => signInWithPopup(auth, new GoogleAuthProvider()),
+
+    /**
+     * Tạo reCAPTCHA verifier (bắt buộc cho đăng nhập bằng số điện thoại trên web).
+     * @param {string} containerId id của phần tử chứa reCAPTCHA.
+     * @returns {RecaptchaVerifier}
+     */
+    makeRecaptcha: (containerId) =>
+      new RecaptchaVerifier(auth, containerId, { size: 'invisible' }),
+
+    /**
+     * Gửi mã OTP tới số điện thoại (định dạng E.164, ví dụ +84912345678).
+     * @param {string} phoneNumber
+     * @param {RecaptchaVerifier} appVerifier
+     * @returns {Promise<import('firebase/auth').ConfirmationResult>}
+     */
+    sendPhoneOtp: (phoneNumber, appVerifier) =>
+      signInWithPhoneNumber(auth, phoneNumber, appVerifier),
+
     logout: () => signOut(auth),
   };
 
