@@ -40,6 +40,19 @@ export function AuthProvider({ children }) {
     loginGoogle: () => signInWithPopup(auth, new GoogleAuthProvider()),
 
     /**
+     * Đăng nhập Google + xin quyền Google Calendar, trả về access token để gọi
+     * Calendar API (dùng cho đồng bộ lịch trực tiếp, không cần file).
+     * @returns {Promise<string|undefined>} OAuth access token.
+     */
+    requestCalendarToken: async () => {
+      const provider = new GoogleAuthProvider();
+      provider.addScope('https://www.googleapis.com/auth/calendar.events');
+      const result = await signInWithPopup(auth, provider);
+      const cred = GoogleAuthProvider.credentialFromResult(result);
+      return cred ? cred.accessToken : undefined;
+    },
+
+    /**
      * Tạo reCAPTCHA verifier (bắt buộc cho đăng nhập bằng số điện thoại trên web).
      * @param {string} containerId id của phần tử chứa reCAPTCHA.
      * @returns {RecaptchaVerifier}

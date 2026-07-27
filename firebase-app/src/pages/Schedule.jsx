@@ -1,6 +1,11 @@
-// Module Lịch giảng dạy: import TKB từ Excel -> hiển thị (lịch tuần / bảng) -> xuất Google Calendar / ICS.
+// Module Lịch giảng dạy: import TKB Excel -> LƯU per-user (Firestore) -> hiển thị
+// (lịch tuần / bảng) -> đồng bộ Google Calendar trực tiếp + xuất CSV/ICS.
 import { useEffect, useMemo, useState } from 'react';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase.js';
+import { useAuth } from '../contexts/AuthContext.jsx';
 import { buildSessions, buildGcalCsv, buildIcs } from '../lib/timetable.js';
+import { syncToGoogleCalendar } from '../lib/gcalSync.js';
 
 function downloadFile(filename, content, mime) {
   const blob = new Blob([content], { type: mime });
@@ -14,7 +19,6 @@ function downloadFile(filename, content, mime) {
   URL.revokeObjectURL(url);
 }
 
-// Màu ổn định theo lớp (để dễ phân biệt buổi học).
 function colorFor(key) {
   let h = 0;
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) % 360;
@@ -34,19 +38,63 @@ function ymd(d) {
   return `${y}-${m}-${day}`;
 }
 function ddmm(dateStr) {
-  const [y, m, d] = dateStr.split('-');
+  const [, m, d] = dateStr.split('-');
   return `${d}/${m}`;
 }
 
 export default function Schedule() {
+  const { user, requestCalendarToken } = useAuth();
   const [week1, setWeek1] = useState('');
   const [offset, setOffset] = useState(0);
   const [fileName, setFileName] = useState('');
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [view, setView] = useState('calendar'); // 'calendar' | 'table'
+  const [view, setView] = useState('calendar');
   const [selectedWeek, setSelectedWeek] = useState(null);
+  const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | error
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
+
+  // Khôi phục lịch đã lưu của người dùng (nếu có).
+  useEffect(() => {
+    if (!user) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'schedules', user.uid));
+        if (cancelled || !snap.exists()) return;
+        const d = snap.data();
+        if (d.rowsJson) setRows(JSON.parse(d.rowsJson));
+        if (d.week1) setWeek1(d.week1);
+        if (typeof d.offset !== 'undefined') setOffset(d.offset);
+        if (d.fileName) setFileName(d.fileName);
+        setSaveState('saved');
+      } catch {
+        /* Firestore chưa sẵn sàng -> vẫn dùng ngoại tuyến được */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  // Lưu lịch (best-effort). Gọi khi import hoặc đổi ngày/dịch tuần.
+  async function persist(nextRows, w1, off, fname) {
+    if (!user || !nextRows) return;
+    setSaveState('saving');
+    try {
+      await setDoc(doc(db, 'schedules', user.uid), {
+        uid: user.uid,
+        rowsJson: JSON.stringify(nextRows),
+        week1: w1 || '',
+        offset: Number(off) || 0,
+        fileName: fname || '',
+        updatedAt: serverTimestamp(),
+      });
+      setSaveState('saved');
+    } catch {
+      setSaveState('error');
+    }
+  }
 
   async function handleFile(e) {
     const file = e.target.files?.[0];
@@ -61,12 +109,22 @@ export default function Schedule() {
       const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
       setRows(data);
       setFileName(file.name);
+      persist(data, week1, offset, file.name);
     } catch (err) {
       setError('Không đọc được file Excel: ' + (err?.message || err));
       setRows(null);
     } finally {
       setBusy(false);
     }
+  }
+
+  function onWeek1Change(v) {
+    setWeek1(v);
+    if (rows) persist(rows, v, offset, fileName);
+  }
+  function onOffsetChange(v) {
+    setOffset(v);
+    if (rows) persist(rows, week1, v, fileName);
   }
 
   const baseMonday = useMemo(() => {
@@ -87,7 +145,6 @@ export default function Schedule() {
     [sessions]
   );
 
-  // Chọn tuần đầu tiên khi có dữ liệu (hoặc khi tuần hiện tại không còn hợp lệ).
   useEffect(() => {
     if (weeks.length && !weeks.includes(selectedWeek)) setSelectedWeek(weeks[0]);
   }, [weeks, selectedWeek]);
@@ -97,6 +154,25 @@ export default function Schedule() {
   }
   function exportIcs() {
     downloadFile('TKB.ics', buildIcs(sessions), 'text/calendar;charset=utf-8');
+  }
+
+  async function handleSync() {
+    if (!sessions.length) return;
+    setSyncing(true);
+    setSyncMsg('Đang xin quyền Google Calendar…');
+    try {
+      const token = await requestCalendarToken();
+      if (!token) throw new Error('Không lấy được quyền Google Calendar.');
+      setSyncMsg(`Đang đồng bộ 0/${sessions.length}…`);
+      const r = await syncToGoogleCalendar(sessions, token, (d, t) => setSyncMsg(`Đang đồng bộ ${d}/${t}…`));
+      let msg = `✅ Xong: thêm ${r.added}, cập nhật ${r.updated}` + (r.failed ? `, lỗi ${r.failed}` : '') + '.';
+      if (r.errors.length) msg += ' Lỗi đầu tiên: ' + r.errors[0];
+      setSyncMsg(msg);
+    } catch (e) {
+      setSyncMsg('❌ Lỗi đồng bộ: ' + (e?.message || e));
+    } finally {
+      setSyncing(false);
+    }
   }
 
   const ready = rows && baseMonday;
@@ -113,15 +189,21 @@ export default function Schedule() {
           </label>
           <label className="sched-field">
             2. Ngày Thứ 2 của Tuần 1
-            <input type="date" value={week1} onChange={(e) => setWeek1(e.target.value)} />
+            <input type="date" value={week1} onChange={(e) => onWeek1Change(e.target.value)} />
           </label>
           <label className="sched-field sched-offset">
             3. Dịch tuần (±)
-            <input type="number" value={offset} onChange={(e) => setOffset(e.target.value)} />
+            <input type="number" value={offset} onChange={(e) => onOffsetChange(e.target.value)} />
           </label>
         </div>
 
-        {fileName && <p className="muted">Đã nạp: <strong>{fileName}</strong></p>}
+        <div className="sched-status">
+          {fileName && <span className="muted">Đã nạp: <strong>{fileName}</strong></span>}
+          {saveState === 'saving' && <span className="muted">• Đang lưu…</span>}
+          {saveState === 'saved' && <span className="save-ok">• Đã lưu (tự khôi phục lần sau)</span>}
+          {saveState === 'error' && <span className="save-err">• Chưa lưu được (cần bật Firestore)</span>}
+        </div>
+
         {busy && <p className="muted">Đang đọc file…</p>}
         {error && <div className="error-box">{error}</div>}
         {rows && !baseMonday && (
@@ -131,26 +213,26 @@ export default function Schedule() {
         {ready && (
           <div className="sched-actions">
             <span className="muted">{sessions.length} buổi học</span>
-            <button className="btn btn-primary" onClick={exportCsv} disabled={!sessions.length}>
-              Xuất CSV (Google Calendar)
+            <button className="btn btn-primary" onClick={handleSync} disabled={!sessions.length || syncing}>
+              {syncing ? 'Đang đồng bộ…' : '🔄 Đồng bộ Google Calendar'}
+            </button>
+            <button className="btn btn-google" onClick={exportCsv} disabled={!sessions.length}>
+              Xuất CSV
             </button>
             <button className="btn btn-google" onClick={exportIcs} disabled={!sessions.length}>
               Xuất .ics
             </button>
           </div>
         )}
+        {syncMsg && <div className="hint-box">{syncMsg}</div>}
       </div>
 
       {ready && sessions.length > 0 && (
         <>
           <div className="sched-viewbar">
             <div className="method-tabs sched-tabs">
-              <button className={view === 'calendar' ? 'tab active' : 'tab'} onClick={() => setView('calendar')}>
-                Lịch tuần
-              </button>
-              <button className={view === 'table' ? 'tab active' : 'tab'} onClick={() => setView('table')}>
-                Bảng
-              </button>
+              <button className={view === 'calendar' ? 'tab active' : 'tab'} onClick={() => setView('calendar')}>Lịch tuần</button>
+              <button className={view === 'table' ? 'tab active' : 'tab'} onClick={() => setView('table')}>Bảng</button>
             </div>
           </div>
 
@@ -166,23 +248,21 @@ export default function Schedule() {
       )}
 
       <div className="card sched-help">
-        <strong>Hướng dẫn nhanh</strong>
-        <ol>
-          <li>Chọn file TKB xuất từ hệ thống trường (giữ nguyên định dạng).</li>
-          <li>Chọn ngày <strong>Thứ 2 của Tuần 1</strong> (tuần đầu học kỳ). Nếu lệch, dùng ô "Dịch tuần".</li>
-          <li>Bấm <strong>Xuất CSV</strong> rồi vào Google Calendar → <em>Settings → Import &amp; export → Import</em>. Hoặc <strong>Xuất .ics</strong>.</li>
-        </ol>
+        <strong>Ghi chú</strong>
+        <ul>
+          <li>Lịch được <strong>lưu theo tài khoản</strong>: lần sau vào là tự hiện, chỉ đổi khi bạn import file mới.</li>
+          <li><strong>Đồng bộ Google Calendar</strong>: đăng nhập Gmail &amp; cho phép quyền, các buổi học được ghi thẳng vào lịch chính. Đồng bộ lại sẽ <em>cập nhật</em> đúng buổi cũ (không tạo trùng).</li>
+          <li><strong>Xuất CSV</strong>: nạp thủ công qua Google Calendar → <em>Settings → Import &amp; export</em>.</li>
+        </ul>
       </div>
     </div>
   );
 }
 
-/* ---------------- Lịch tuần ---------------- */
 function CalendarView({ sessions, weeks, baseMonday, selectedWeek, setSelectedWeek }) {
   const idx = weeks.indexOf(selectedWeek);
   const week = selectedWeek ?? weeks[0];
 
-  // Ngày của từng cột (Thứ 2..CN) trong tuần đang chọn.
   const colDates = useMemo(() => {
     const monday = new Date(baseMonday.getTime());
     monday.setDate(monday.getDate() + (week - 1) * 7);
@@ -209,9 +289,7 @@ function CalendarView({ sessions, weeks, baseMonday, selectedWeek, setSelectedWe
           {weeks.map((w) => <option key={w} value={w}>Tuần {w}</option>)}
         </select>
         <button className="btn btn-ghost week-btn" disabled={idx >= weeks.length - 1} onClick={() => setSelectedWeek(weeks[idx + 1])}>›</button>
-        <span className="muted week-range">
-          {colDates[0] && `${ddmm(colDates[0])} – ${ddmm(colDates[6])}`}
-        </span>
+        <span className="muted week-range">{colDates[0] && `${ddmm(colDates[0])} – ${ddmm(colDates[6])}`}</span>
       </div>
 
       <div className="cal-grid">
@@ -226,8 +304,7 @@ function CalendarView({ sessions, weeks, baseMonday, selectedWeek, setSelectedWe
               {byThu[c.thu].map((s, k) => {
                 const col = colorFor(s.class || s.subject);
                 return (
-                  <div className="cal-event" key={k}
-                    style={{ background: col.bg, borderLeftColor: col.border }}>
+                  <div className="cal-event" key={k} style={{ background: col.bg, borderLeftColor: col.border }}>
                     <div className="cal-time">{s.startTime}–{s.endTime} · Tiết {s.p1}-{s.p2}</div>
                     <div className="cal-subj" style={{ color: col.text }}>{s.subject}</div>
                     <div className="cal-room">📍 {s.room}</div>
@@ -242,7 +319,6 @@ function CalendarView({ sessions, weeks, baseMonday, selectedWeek, setSelectedWe
   );
 }
 
-/* ---------------- Bảng ---------------- */
 function TableView({ sessions, weeks }) {
   const [weekFilter, setWeekFilter] = useState('all');
   const visible = weekFilter === 'all' ? sessions : sessions.filter((s) => String(s.week) === String(weekFilter));

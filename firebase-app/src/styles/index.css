@@ -534,6 +534,17 @@ select:focus {
   margin: 0.25rem 0;
 }
 
+.sched-status {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 0.6rem;
+  font-size: 0.85rem;
+}
+.save-ok { color: #059669; }
+.save-err { color: var(--danger); }
+
 /* view toggle + week nav */
 .sched-viewbar {
   display: flex;
