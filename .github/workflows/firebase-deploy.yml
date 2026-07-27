@@ -51,3 +51,5 @@ jobs:
         env:
           GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_VUPQ_HUB }}
           PROJECT_ID: vupq-hub
+          # firebase.json / .firebaserc nằm trong thư mục con firebase-app.
+          PROJECT_PATH: ./firebase-app
