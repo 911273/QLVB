@@ -44,12 +44,25 @@ jobs:
           VITE_FIREBASE_MEASUREMENT_ID: G-9E3S6LDV2F
         run: npm run build
 
-      - name: Deploy to Firebase (Hosting + Firestore)
+      # Deploy Hosting trước — đây là phần đưa web app lên mạng, phải chắc chắn thành công.
+      - name: Deploy Hosting
         uses: w9jds/firebase-action@master
         with:
-          args: deploy --only hosting,firestore --project vupq-hub
+          args: deploy --only hosting --project vupq-hub
         env:
           GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_VUPQ_HUB }}
           PROJECT_ID: vupq-hub
           # firebase.json / .firebaserc nằm trong thư mục con firebase-app.
+          PROJECT_PATH: ./firebase-app
+
+      # Deploy Firestore rules & indexes. continue-on-error để nếu Firestore chưa
+      # sẵn sàng (chưa tạo DB / thiếu quyền Service Usage) thì KHÔNG chặn Hosting.
+      - name: Deploy Firestore rules & indexes (optional)
+        continue-on-error: true
+        uses: w9jds/firebase-action@master
+        with:
+          args: deploy --only firestore --project vupq-hub
+        env:
+          GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_VUPQ_HUB }}
+          PROJECT_ID: vupq-hub
           PROJECT_PATH: ./firebase-app
