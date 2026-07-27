@@ -7,7 +7,7 @@ const MODULES = [
   { to: '/documents', icon: '📄', title: 'Quản lý văn bản', desc: 'Lưu trữ, phân loại, tìm kiếm.', ready: false },
   { to: '/quiz', icon: '📝', title: 'Trộn đề & chấm', desc: 'Tạo đề trắc nghiệm, chấm điểm.', ready: false },
   { to: '/gradebook', icon: '📊', title: 'Bảng điểm', desc: 'Quản lý điểm các lớp.', ready: false },
-  { to: '/schedule', icon: '📅', title: 'Lịch giảng dạy', desc: 'Đồng bộ lịch (tạm gác).', ready: false },
+  { to: '/schedule', icon: '📅', title: 'Lịch giảng dạy', desc: 'Import TKB Excel, xuất Google Calendar.', ready: true },
 ];
 
 export default function Dashboard() {

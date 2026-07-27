@@ -449,6 +449,91 @@ select:focus {
   background: #fff;
 }
 
+/* ---------- Schedule (Lịch giảng dạy) ---------- */
+.sched-controls {
+  margin-bottom: 1rem;
+}
+.sched-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.sched-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  flex: 1;
+  min-width: 200px;
+  margin: 0;
+}
+.sched-field.sched-offset {
+  flex: 0 0 140px;
+  min-width: 120px;
+}
+.sched-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+.sched-actions .btn {
+  width: auto;
+  margin: 0;
+}
+.hint-box {
+  background: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 0.6rem 0.85rem;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+.sched-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+.sched-table th,
+.sched-table td {
+  text-align: left;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.sched-table th {
+  background: #f9fafb;
+  position: sticky;
+  top: 0;
+  font-weight: 600;
+}
+.sched-table tbody tr:hover {
+  background: #f9fafb;
+}
+.sched-table td:nth-child(6) {
+  white-space: normal;
+  min-width: 220px;
+}
+.sched-help {
+  margin-top: 1rem;
+}
+.sched-help ol {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+.sched-help li {
+  margin: 0.25rem 0;
+}
+
 /* ---------- Placeholder ---------- */
 .placeholder {
   max-width: 640px;
