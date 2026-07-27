@@ -5,8 +5,15 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import {
-  parseQuestions, parseWordParagraphs, makeVariants, gradeOne, answerKeyCsv, resultsCsv, parseStudentRows, LABELS,
+  parseQuestions, makeVariants, gradeOne, answerKeyCsv, resultsCsv, parseStudentRows, LABELS,
 } from '../lib/quiz.js';
+import { parseDocxToQuestions } from '../lib/docx.js';
+
+// Hiển thị nội dung có thể chứa html (ảnh/công thức/in đậm từ Word).
+function Rich({ html, text }) {
+  if (html) return <span dangerouslySetInnerHTML={{ __html: html }} />;
+  return <span>{text}</span>;
+}
 
 function download(name, content, mime) {
   const blob = new Blob([content], { type: mime });
@@ -15,27 +22,6 @@ function download(name, content, mime) {
   a.href = url; a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
-}
-
-// Bỏ phần nhãn "A."/"(A)"/"[<$>]" ở đầu để xét phần NỘI DUNG đáp án.
-function stripOptLabel(s) {
-  return String(s || '').replace(/^\s*(\[\s*<?\s*\$\s*>?\s*\]\s*)?[-•●▪]?\s*(?:\([A-Ha-h]\)|[A-Ha-h][.)])\s*/, '');
-}
-
-// Chuyển HTML (từ mammoth) -> đoạn văn + cờ in đậm/gạch chân THỰC SỰ trên phần
-// nội dung (không tính khi chỉ nhãn "A." được in đậm — tránh chọn nhầm đáp án).
-function htmlToParagraphs(html) {
-  const docp = new DOMParser().parseFromString(html, 'text/html');
-  return [...docp.body.querySelectorAll('p, li')].map((p) => {
-    const full = (p.textContent || '').trim();
-    let emphText = '';
-    p.querySelectorAll('strong, b, u').forEach((el) => { emphText += el.textContent || ''; });
-    const fullBody = stripOptLabel(full);
-    const emphBody = stripOptLabel(emphText.trim());
-    // In đậm được coi là "đánh dấu đáp án" khi phủ >= 50% nội dung (bỏ nhãn).
-    const emphasized = fullBody.length > 0 && emphBody.length >= Math.max(3, fullBody.length * 0.5);
-    return { text: full, emphasized };
-  });
 }
 
 function escapeHtml(s) {
@@ -119,13 +105,10 @@ function BankTab({ questions, updateQuestions, saveState }) {
     const file = e.target.files?.[0];
     if (!file) return;
     setWordBusy(true);
-    setMsg('Đang đọc file Word…');
+    setMsg('Đang đọc file Word (giữ ảnh & công thức)…');
     try {
-      const mammoth = await import('mammoth');
       const buf = await file.arrayBuffer();
-      const { value: html } = await mammoth.convertToHtml({ arrayBuffer: buf });
-      const paras = htmlToParagraphs(html);
-      const { questions: parsed, errors } = parseWordParagraphs(paras);
+      const { questions: parsed, errors } = await parseDocxToQuestions(buf);
       if (!parsed.length) { setMsg('Không nhận được câu hỏi nào từ Word. ' + (errors[0] || 'Kiểm tra định dạng "Câu 1", "A.", đánh dấu đáp án đúng.')); return; }
       updateQuestions([...questions, ...parsed]);
       setMsg(`Đã import ${parsed.length} câu từ Word.` + (errors.length ? ` (${errors.length} câu bỏ qua)` : ''));
@@ -179,11 +162,11 @@ D. 380/660V`}</pre>
           <ol className="quiz-list">
             {questions.map((q) => (
               <li key={q.id}>
-                <div className="quiz-q-stem">{q.stem}</div>
+                <div className="quiz-q-stem"><Rich html={q.stemHtml} text={q.stem} /></div>
                 <ul className="quiz-q-opts">
                   {q.options.map((o, i) => (
                     <li key={i} className={o.correct ? 'correct' : ''}>
-                      <strong>{LABELS[i]}.</strong> {o.text}{o.correct && ' ✓'}
+                      <strong>{LABELS[i]}.</strong> <Rich html={o.html} text={o.text} />{o.correct && ' ✓'}
                     </li>
                   ))}
                 </ul>
@@ -232,13 +215,14 @@ function MixTab({ questions, variants, setVariants, download }) {
   // Xuất PDF qua in trình duyệt (hỗ trợ tiếng Việt hoàn hảo, chọn "Lưu thành PDF").
   function exportPdf() {
     const esc = escapeHtml;
+    const cell = (html, text) => (html ? html : esc(text)); // ảnh/công thức giữ html
     let body = '';
     variants.forEach((v) => {
       body += `<section class="exam"><h2>${esc(examTitle)}</h2><div class="code">Mã đề: <b>${v.code}</b></div>`;
       body += `<div class="meta">Họ tên: ...................................... &nbsp;&nbsp; Lớp: ............... &nbsp;&nbsp; MSSV: ...............</div>`;
       v.items.forEach((it) => {
-        body += `<div class="q"><div class="stem"><b>Câu ${it.position}.</b> ${esc(it.stem)}</div><div class="opts">`;
-        it.options.forEach((o, i) => { body += `<div class="opt"><b>${LABELS[i]}.</b> ${esc(o)}</div>`; });
+        body += `<div class="q"><div class="stem"><b>Câu ${it.position}.</b> ${cell(it.stemHtml, it.stem)}</div><div class="opts">`;
+        it.options.forEach((o, i) => { body += `<div class="opt"><b>${LABELS[i]}.</b> ${cell(it.optionsHtml?.[i], o)}</div>`; });
         body += `</div></div>`;
       });
       body += `</section>`;
@@ -253,16 +237,18 @@ function MixTab({ questions, variants, setVariants, download }) {
     const html = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>${esc(examTitle)}</title>
 <style>
 @page{size:A4;margin:15mm}
-body{font-family:'Times New Roman',serif;font-size:13pt;line-height:1.45;color:#000}
+body{font-family:'Times New Roman','Liberation Serif','DejaVu Serif',serif;font-size:13pt;line-height:1.45;color:#000}
 .exam{page-break-after:always}
 .keypage{page-break-after:auto}
 h2{text-align:center;font-size:15pt;margin:0 0 4pt}
 .code{text-align:center;margin-bottom:8pt}
 .meta{margin-bottom:10pt;font-style:italic}
-.q{margin-bottom:8pt}
+.q{margin-bottom:8pt;page-break-inside:avoid}
 .stem{margin-bottom:2pt}
 .opts{display:grid;grid-template-columns:1fr 1fr;gap:2pt 16pt;padding-left:12pt}
 .keyrow{margin-bottom:6pt}
+.q-img{max-width:60mm;max-height:45mm;vertical-align:middle}
+.q-math{font-style:italic}
 @media print{button{display:none}}
 </style></head><body>${body}</body></html>`;
 
@@ -333,11 +319,11 @@ h2{text-align:center;font-size:15pt;margin:0 0 4pt}
             <ol className="quiz-list">
               {v.items.map((it) => (
                 <li key={it.position}>
-                  <div className="quiz-q-stem">{it.stem}</div>
+                  <div className="quiz-q-stem"><Rich html={it.stemHtml} text={it.stem} /></div>
                   <ul className="quiz-q-opts">
                     {it.options.map((o, i) => (
                       <li key={i} className={LABELS[i] === it.correctLabel ? 'correct' : ''}>
-                        <strong>{LABELS[i]}.</strong> {o}{LABELS[i] === it.correctLabel && ' ✓'}
+                        <strong>{LABELS[i]}.</strong> <Rich html={it.optionsHtml?.[i]} text={o} />{LABELS[i] === it.correctLabel && ' ✓'}
                       </li>
                     ))}
                   </ul>

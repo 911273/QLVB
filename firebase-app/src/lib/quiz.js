@@ -147,7 +147,9 @@ export function makeVariants(questions, opts) {
       return {
         position: idx + 1,
         stem: q.stem,
+        stemHtml: q.stemHtml || '',
         options: opts.map((o) => o.text),
+        optionsHtml: opts.map((o) => o.html || ''),
         correctLabel: LABELS[correctPos] || '',
       };
     });

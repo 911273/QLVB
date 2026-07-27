@@ -700,6 +700,19 @@ select:focus {
   color: #059669;
   font-weight: 600;
 }
+.quiz-q-stem img.q-img,
+.quiz-q-opts img.q-img {
+  max-width: 100%;
+  max-height: 160px;
+  vertical-align: middle;
+}
+.q-math {
+  font-style: italic;
+  font-family: 'Cambria Math', 'Times New Roman', serif;
+  background: #f8fafc;
+  padding: 0 2px;
+  border-radius: 3px;
+}
 
 /* ---------- Placeholder ---------- */
 .placeholder {
