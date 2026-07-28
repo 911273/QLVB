@@ -41,7 +41,10 @@ function ommlToText(node) {
   return convChildren(node);
 }
 
-/* ---------- Ảnh: id nhúng -> data URI ---------- */
+// Định dạng ảnh trình duyệt hiển thị được (WMF/EMF thì KHÔNG).
+const WEB_IMG = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']);
+
+/* ---------- Ảnh: id nhúng -> {uri, ext} ---------- */
 function imgFromDrawing(el, embedMap) {
   const all = el.getElementsByTagName('*');
   for (const b of all) {
@@ -51,7 +54,14 @@ function imgFromDrawing(el, embedMap) {
       || b.getAttribute('r:embed') || b.getAttribute('r:id');
     if (id && embedMap[id]) return embedMap[id];
   }
-  return '';
+  return null;
+}
+
+// Ảnh web -> <img>; ảnh WMF/EMF (browser không đọc được) -> placeholder gọn.
+function imgHtml(im) {
+  if (!im) return '';
+  if (WEB_IMG.has(im.ext)) return `<img src="${im.uri}" class="q-img" alt="hình"/>`;
+  return `<span class="q-noimg" title="Ảnh ${im.ext.toUpperCase()} không hiển thị được trên web">🔣 [hình/công thức]</span>`;
 }
 
 /* ---------- 1 paragraph -> {html, text, emphasized} ---------- */
@@ -82,8 +92,8 @@ function parseParagraph(pEl, embedMap) {
             html += strong ? `<strong>${esc(tx)}</strong>` : esc(tx);
             if (strong) emphChars += tx.length;
           } else if (rn === 'drawing' || rn === 'pict' || rn === 'object') {
-            const uri = imgFromDrawing(rc, embedMap);
-            if (uri) { html += `<img src="${uri}" class="q-img" alt="hình"/>`; text += ' [hình] '; }
+            const im = imgFromDrawing(rc, embedMap);
+            if (im) { html += imgHtml(im); text += ' [hình] '; }
           } else if (rn === 'br') { html += '<br/>'; text += ' '; }
           else if (rn === 'tab') { html += ' '; text += ' '; }
         }
@@ -94,8 +104,8 @@ function parseParagraph(pEl, embedMap) {
         const f = ommlToText(child).trim();
         if (f) { html += `<span class="q-math">${esc(f)}</span>`; text += ` ${f} `; totalChars += f.length; }
       } else if (name === 'drawing' || name === 'pict') {
-        const uri = imgFromDrawing(child, embedMap);
-        if (uri) { html += `<img src="${uri}" class="q-img" alt="hình"/>`; text += ' [hình] '; }
+        const im = imgFromDrawing(child, embedMap);
+        if (im) { html += imgHtml(im); text += ' [hình] '; }
       } else {
         walk(child); // hyperlink, smartTag, ...
       }
@@ -150,10 +160,15 @@ export async function parseDocxToQuestions(arrayBuffer) {
       const path = target.startsWith('/') ? target.slice(1) : 'word/' + target.replace(/^\.\//, '');
       const mf = zip.file(path);
       if (!mf) continue;
-      const b64 = await mf.async('base64');
       const extn = (path.split('.').pop() || 'png').toLowerCase();
-      const mime = extn === 'jpg' ? 'image/jpeg' : extn === 'emf' ? 'image/x-emf' : `image/${extn}`;
-      embedMap[id] = `data:${mime};base64,${b64}`;
+      // Chỉ nhúng base64 cho ảnh web hiển thị được (tránh phình dữ liệu WMF vô ích).
+      let uri = '';
+      if (WEB_IMG.has(extn)) {
+        const b64 = await mf.async('base64');
+        const mime = extn === 'jpg' ? 'image/jpeg' : `image/${extn}`;
+        uri = `data:${mime};base64,${b64}`;
+      }
+      embedMap[id] = { uri, ext: extn };
     }
   }
 

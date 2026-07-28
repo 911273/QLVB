@@ -713,6 +713,15 @@ select:focus {
   padding: 0 2px;
   border-radius: 3px;
 }
+.q-noimg {
+  display: inline-block;
+  background: #fff7ed;
+  color: #9a3412;
+  border: 1px dashed #fdba74;
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 0.85em;
+}
 
 /* ---------- Placeholder ---------- */
 .placeholder {
