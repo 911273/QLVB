@@ -4,6 +4,20 @@
 // (a/b), x^{2}... để đọc được mà không phụ thuộc bộ render toán học.
 
 const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
+// Màu đỏ (đánh dấu đáp án đúng trong bản Word xuất từ Midx): FF0000 / EE0000...
+function isRedColor(v) {
+  if (!v) return false;
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(String(v).trim());
+  if (!m) return false;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return r >= 150 && g <= 90 && b <= 90;
+}
+function attrW(el, name) {
+  return el.getAttributeNS(W_NS, name) || el.getAttribute('w:' + name) || el.getAttribute(name);
+}
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -42,7 +56,7 @@ function imgFromDrawing(el, embedMap) {
 
 /* ---------- 1 paragraph -> {html, text, emphasized} ---------- */
 function parseParagraph(pEl, embedMap) {
-  let html = '', text = '', emphChars = 0, totalChars = 0;
+  let html = '', text = '', emphChars = 0, totalChars = 0, marked = false;
 
   function walk(node) {
     for (const child of node.children) {
@@ -50,10 +64,20 @@ function parseParagraph(pEl, embedMap) {
       if (name === 'r') {
         const rPr = directChild(child, 'rPr');
         const strong = !!(rPr && (directChild(rPr, 'b') || directChild(rPr, 'u')));
+        let redRun = false, hlRun = false;
+        if (rPr) {
+          const colEl = directChild(rPr, 'color');
+          if (colEl && isRedColor(attrW(colEl, 'val'))) redRun = true;
+          const hlEl = directChild(rPr, 'highlight');
+          const hv = hlEl && attrW(hlEl, 'val');
+          if (hv && hv !== 'none') hlRun = true;
+        }
+        let runText = '';
         for (const rc of child.children) {
           const rn = ln(rc);
           if (rn === 't') {
             const tx = rc.textContent || '';
+            runText += tx;
             text += tx; totalChars += tx.length;
             html += strong ? `<strong>${esc(tx)}</strong>` : esc(tx);
             if (strong) emphChars += tx.length;
@@ -63,6 +87,9 @@ function parseParagraph(pEl, embedMap) {
           } else if (rn === 'br') { html += '<br/>'; text += ' '; }
           else if (rn === 'tab') { html += ' '; text += ' '; }
         }
+        // Chỉ tính "đánh dấu" khi run tô đỏ/highlight CÓ nội dung chữ
+        // (bỏ qua khoảng trắng bị bôi đỏ vô tình -> tránh nhận nhầm 2 đáp án).
+        if ((redRun || hlRun) && /\S/.test(runText)) marked = true;
       } else if (name === 'oMath' || name === 'oMathPara') {
         const f = ommlToText(child).trim();
         if (f) { html += `<span class="q-math">${esc(f)}</span>`; text += ` ${f} `; totalChars += f.length; }
@@ -77,11 +104,11 @@ function parseParagraph(pEl, embedMap) {
   walk(pEl);
 
   const emphasized = totalChars > 0 && emphChars >= Math.max(3, totalChars * 0.5);
-  return { html: html.trim(), text: text.replace(/\s+/g, ' ').trim(), emphasized };
+  return { html: html.trim(), text: text.replace(/\s+/g, ' ').trim(), emphasized, marked };
 }
 
-/* ---------- Bỏ nhãn "A."/"(A)"/"[<$>]" ở đầu html ---------- */
-const LABEL_RE = /^\s*(\[\s*<?\s*\$\s*>?\s*\]\s*)?[-•●▪]?\s*(?:\([A-Ha-h]\)|[A-Ha-h][.)])\s*/;
+/* ---------- Bỏ nhãn "A."/"(A)"/"[<$>]" ở đầu html (nhãn chữ là TÙY CHỌN) ---------- */
+const LABEL_RE = /^\s*(\[\s*<?\s*\$\s*>?\s*\]\s*)?[-•●▪]?\s*(?:(?:\([A-Ha-h]\)|[A-Ha-h][.)])\s*)?/;
 function stripLabelHtml(html) {
   const d = new DOMParser().parseFromString('<div>' + html + '</div>', 'text/html');
   const root = d.body.firstChild;
@@ -92,8 +119,12 @@ function stripLabelHtml(html) {
   return root.innerHTML.trim();
 }
 
-const HEADER_RE = /^\s*Câu\s*\d+\s*[:.\-]?\s*(?:\[\s*<[^>]*>\s*\])?\s*(.*)$/i;
+const HEADER_RE = /^\s*Câu\s*\d+\s*[:.\-]?\s*(?:\[[^\]]*\]\s*)?[:.\-]?\s*(.*)$/i;
 const OPT_RE = /^\s*(\[\s*<?\s*\$\s*>?\s*\]\s*)?(\*?)\s*[-•●▪]?\s*(?:\(([A-Ha-h])\)|([A-Ha-h])[.)])\s*(.+)$/;
+// Marker đáp án kiểu Midx: "[<$>]" / "[$]" ở đầu dòng, KHÔNG cần nhãn chữ.
+const MIDX_OPT = /^\s*\[\s*<?\s*\$\s*>?\s*\]\s*(.+)$/;
+// Dòng chương/section: "[(<...>)] Chương ..." -> bỏ qua.
+const CHAPTER_RE = /^\s*\[\s*\(/;
 
 /**
  * Đọc file .docx -> danh sách câu hỏi (giữ ảnh & công thức trong html).
@@ -147,14 +178,23 @@ function groupQuestions(paras) {
     if (!cur) return;
     const opts = cur.options;
     if (opts.length >= 2) {
-      const hasExplicit = opts.some((o) => o.explicit);
+      // Thứ tự ưu tiên nhận diện đáp án đúng:
+      //  1) Tô màu đỏ / highlight (bản Midx) — đúng 1 đáp án.
+      //  2) Marker tường minh ([<$>]/*) chỉ trên MỘT SỐ đáp án (không phải tất cả).
+      //  3) In đậm đúng 1 đáp án.
+      const markedCount = opts.filter((o) => o.marked).length;
+      const explicitCount = opts.filter((o) => o.explicit).length;
       const emphCount = opts.filter((o) => o.emph).length;
-      const useEmph = !hasExplicit && emphCount === 1;
-      if (hasExplicit || useEmph) {
+      let source = null;
+      if (markedCount === 1) source = 'marked';
+      else if (explicitCount >= 1 && explicitCount < opts.length) source = 'explicit';
+      else if (emphCount === 1) source = 'emph';
+
+      if (source) {
         const finalOpts = opts.map((o) => ({
           text: o.text.trim(),
           html: stripLabelHtml(o.html),
-          correct: hasExplicit ? o.explicit : o.emph,
+          correct: source === 'marked' ? o.marked : source === 'explicit' ? o.explicit : o.emph,
         }));
         questions.push({
           id: 'qd' + Date.now() + '_' + (seq++),
@@ -172,17 +212,26 @@ function groupQuestions(paras) {
 
   for (const p of paras) {
     if (!p.text && !p.html) continue;
+    if (CHAPTER_RE.test(p.text)) continue; // bỏ dòng chương "[(<...>)]"
+
+    const midx = p.text.match(MIDX_OPT);
     const h = p.text.match(HEADER_RE);
-    if (h && !OPT_RE.test(p.text)) {
+    if (h && !midx && !OPT_RE.test(p.text)) {
       flush();
-      // stemHtml: bỏ tiền tố "Câu n" khỏi html.
-      const stemHtml = stripHeaderHtml(p.html);
-      cur = { stem: h[1] || '', stemHtml, options: [] };
+      cur = { stem: h[1] || '', stemHtml: stripHeaderHtml(p.html), options: [] };
       continue;
     }
     const m = p.text.match(OPT_RE);
-    if (m && cur) {
-      cur.options.push({ text: m[5], html: p.html, explicit: !!(m[1] || m[2]), emph: p.emphasized });
+    if (cur && (midx || m)) {
+      // midx: marker "[<$>]" không nhãn chữ -> mọi đáp án đều có marker nên KHÔNG
+      // dùng làm dấu đúng; đáp án đúng lấy từ p.marked (màu đỏ).
+      cur.options.push({
+        text: midx ? midx[1] : m[5],
+        html: p.html,
+        explicit: midx ? false : !!(m[1] || m[2]),
+        emph: p.emphasized,
+        marked: p.marked,
+      });
     } else if (cur) {
       if (cur.options.length) {
         const last = cur.options[cur.options.length - 1];
@@ -202,6 +251,6 @@ function stripHeaderHtml(html) {
   const root = d.body.firstChild;
   const walker = d.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const first = walker.nextNode();
-  if (first) first.nodeValue = first.nodeValue.replace(/^\s*Câu\s*\d+\s*[:.\-]?\s*(?:\[\s*<[^>]*>\s*\])?\s*/i, '');
+  if (first) first.nodeValue = first.nodeValue.replace(/^\s*Câu\s*\d+\s*[:.\-]?\s*(?:\[[^\]]*\]\s*)?[:.\-]?\s*/i, '');
   return root.innerHTML.trim();
 }
