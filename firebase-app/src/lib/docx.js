@@ -57,11 +57,63 @@ function imgFromDrawing(el, embedMap) {
   return null;
 }
 
-// Ảnh web -> <img>; ảnh WMF/EMF (browser không đọc được) -> placeholder gọn.
+// Có URI hiển thị -> <img>; không thì placeholder gọn.
 function imgHtml(im) {
   if (!im) return '';
-  if (WEB_IMG.has(im.ext)) return `<img src="${im.uri}" class="q-img" alt="hình"/>`;
-  return `<span class="q-noimg" title="Ảnh ${im.ext.toUpperCase()} không hiển thị được trên web">🔣 [hình/công thức]</span>`;
+  if (im.uri) return `<img src="${im.uri}" class="q-img" alt="hình"/>`;
+  return `<span class="q-noimg" title="Ảnh ${(im.ext || '').toUpperCase()} không hiển thị được">🔣 [hình/công thức]</span>`;
+}
+
+/* ---------- WMF/EMF: trích bitmap DIB nhúng bên trong -> BMP ---------- */
+// Nhiều WMF/EMF (từ MathType/Word) thực chất bọc quanh 1 ảnh raster (DIB).
+// Ta quét BITMAPINFOHEADER (biSize=40, BI_RGB) rồi bọc thành file BMP hợp lệ.
+function wmfExtractBmp(u8) {
+  // Bỏ header placeable 22 byte của WMF nếu có.
+  const b = (u8[0] === 0xd7 && u8[1] === 0xcd && u8[2] === 0xc6 && u8[3] === 0x9a) ? u8.subarray(22) : u8;
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  for (let i = 0; i + 40 <= b.length; i += 2) {
+    if (dv.getUint32(i, true) !== 40) continue; // biSize
+    const w = dv.getInt32(i + 4, true), h = dv.getInt32(i + 8, true);
+    const planes = dv.getUint16(i + 12, true), bpp = dv.getUint16(i + 14, true), comp = dv.getUint32(i + 16, true);
+    if (!(w > 0 && Math.abs(h) > 0 && w < 20000 && Math.abs(h) < 20000
+      && planes === 1 && [1, 4, 8, 24, 32].includes(bpp) && comp === 0)) continue;
+    const rowSize = Math.floor((w * bpp + 31) / 32) * 4;
+    const palette = bpp <= 8 ? (1 << bpp) * 4 : 0;
+    const imgSize = rowSize * Math.abs(h);
+    const dibLen = 40 + palette + imgSize;
+    if (i + dibLen > b.length) continue;
+    const dib = b.subarray(i, i + dibLen);
+    const offBits = 14 + 40 + palette;
+    const out = new Uint8Array(14 + dib.length);
+    const hv = new DataView(out.buffer);
+    out[0] = 0x42; out[1] = 0x4d; // "BM"
+    hv.setUint32(2, offBits + imgSize, true);
+    hv.setUint32(10, offBits, true);
+    out.set(dib, 14);
+    return out;
+  }
+  return null;
+}
+
+// BMP (Uint8Array) -> PNG data URI qua canvas, thu nhỏ để nhẹ (tối đa 520px).
+function bmpToPngDataUri(bmpBytes) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(new Blob([bmpBytes], { type: 'image/bmp' }));
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 520;
+      const scale = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight || 1));
+      const cw = Math.max(1, Math.round(img.naturalWidth * scale));
+      const ch = Math.max(1, Math.round(img.naturalHeight * scale));
+      const cv = document.createElement('canvas');
+      cv.width = cw; cv.height = ch;
+      cv.getContext('2d').drawImage(img, 0, 0, cw, ch);
+      URL.revokeObjectURL(url);
+      try { resolve(cv.toDataURL('image/png')); } catch { resolve(''); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(''); };
+    img.src = url;
+  });
 }
 
 /* ---------- 1 paragraph -> {html, text, emphasized} ---------- */
@@ -161,12 +213,18 @@ export async function parseDocxToQuestions(arrayBuffer) {
       const mf = zip.file(path);
       if (!mf) continue;
       const extn = (path.split('.').pop() || 'png').toLowerCase();
-      // Chỉ nhúng base64 cho ảnh web hiển thị được (tránh phình dữ liệu WMF vô ích).
       let uri = '';
       if (WEB_IMG.has(extn)) {
         const b64 = await mf.async('base64');
         const mime = extn === 'jpg' ? 'image/jpeg' : `image/${extn}`;
         uri = `data:${mime};base64,${b64}`;
+      } else if (extn === 'wmf' || extn === 'emf' || extn === 'wmz' || extn === 'emz') {
+        // WMF/EMF: trích bitmap nhúng -> PNG (browser hiển thị được). Tự động.
+        try {
+          const u8 = await mf.async('uint8array');
+          const bmp = wmfExtractBmp(u8);
+          if (bmp) uri = await bmpToPngDataUri(bmp);
+        } catch { /* không trích được -> placeholder */ }
       }
       embedMap[id] = { uri, ext: extn };
     }
