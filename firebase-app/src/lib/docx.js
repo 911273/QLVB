@@ -271,7 +271,7 @@ function groupQuestions(paras) {
         }));
         questions.push({
           id: 'qd' + Date.now() + '_' + (seq++),
-          stem: cur.stem.trim(), stemHtml: cur.stemHtml.trim(),
+          stem: cur.stem.trim(), stemHtml: moveImagesToEnd(cur.stemHtml.trim()),
           options: finalOpts, diff: '', chapter: '',
         });
       } else {
@@ -317,6 +317,22 @@ function groupQuestions(paras) {
   }
   flush();
   return { questions, errors };
+}
+
+// Dời mọi ảnh/placeholder trong câu hỏi xuống CUỐI stem (trên 4 đáp án),
+// mỗi hình một khối, giữ nguyên thứ tự xuất hiện.
+function moveImagesToEnd(html) {
+  if (!/<img|q-noimg/.test(html)) return html;
+  const d = new DOMParser().parseFromString('<div>' + html + '</div>', 'text/html');
+  const root = d.body.firstChild;
+  const figs = [...root.querySelectorAll('img, .q-noimg')];
+  if (!figs.length) return html;
+  figs.forEach((f) => f.remove());
+  const wrap = d.createElement('div');
+  wrap.className = 'q-figs';
+  figs.forEach((f) => wrap.appendChild(f));
+  root.appendChild(wrap);
+  return root.innerHTML.trim();
 }
 
 function stripHeaderHtml(html) {
