@@ -216,9 +216,9 @@ export default function Schedule() {
     try {
       const token = await requestCalendarToken();
       if (!token) throw new Error('Không lấy được quyền Google Calendar.');
-      setSyncMsg(`Đang đồng bộ 0/${sessions.length}…`);
-      const r = await syncToGoogleCalendar(sessions, token, (d, t) => setSyncMsg(`Đang đồng bộ ${d}/${t}…`));
-      let msg = `✅ Xong: thêm ${r.added}, cập nhật ${r.updated}` + (r.failed ? `, lỗi ${r.failed}` : '') + '.';
+      setSyncMsg('Đang dọn lịch cũ & tạo lịch mới…');
+      const r = await syncToGoogleCalendar(sessions, token, (d, t) => setSyncMsg(`Đang ghi ${d}/${t} buổi vào "${'Lịch giảng dạy (TKB)'}"…`));
+      let msg = `✅ Xong: đã ghi ${r.added} buổi vào lịch "${r.calendar}"` + (r.failed ? `, lỗi ${r.failed}` : '') + '. (Lịch cũ đã được thay thế.)';
       if (r.errors.length) msg += ' Lỗi đầu tiên: ' + r.errors[0];
       setSyncMsg(msg);
     } catch (e) {
@@ -315,7 +315,7 @@ export default function Schedule() {
         <strong>Ghi chú</strong>
         <ul>
           <li>Lịch được <strong>lưu theo tài khoản</strong>: lần sau vào là tự hiện, chỉ đổi khi bạn import file mới.</li>
-          <li><strong>Đồng bộ Google Calendar</strong>: đăng nhập Gmail &amp; cho phép quyền, các buổi học được ghi thẳng vào lịch chính. Đồng bộ lại sẽ <em>cập nhật</em> đúng buổi cũ (không tạo trùng).</li>
+          <li><strong>Đồng bộ Google Calendar</strong>: ghi vào một lịch riêng <em>"Lịch giảng dạy (TKB)"</em>. Mỗi lần đồng bộ sẽ <strong>xóa sạch lịch cũ rồi ghi lại</strong> — không bao giờ lẫn lịch cũ với lịch mới. Bạn có thể bật/tắt hoặc đổi màu lịch này trong Google Calendar.</li>
           <li><strong>Xuất CSV</strong>: nạp thủ công qua Google Calendar → <em>Settings → Import &amp; export</em>.</li>
         </ul>
       </div>

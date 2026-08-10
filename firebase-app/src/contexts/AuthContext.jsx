@@ -48,7 +48,8 @@ export function AuthProvider({ children }) {
      */
     requestCalendarToken: async () => {
       const provider = new GoogleAuthProvider();
-      provider.addScope('https://www.googleapis.com/auth/calendar.events');
+      // Scope đầy đủ 'calendar' để tạo/xóa lịch riêng (không chỉ sửa sự kiện).
+      provider.addScope('https://www.googleapis.com/auth/calendar');
       const current = auth.currentUser;
       let result;
       if (current) {
