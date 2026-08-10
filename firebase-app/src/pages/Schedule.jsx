@@ -387,7 +387,7 @@ function CalendarView({ sessions, weeks, baseMonday, selectedWeek, setSelectedWe
             <div className="cal-body">
               {byThu[c.thu].length === 0 && <div className="cal-empty">—</div>}
               {byThu[c.thu].map((s, k) => {
-                const col = colorFor(s.class || s.subject);
+                const col = colorFor(s.course || s.subject);
                 return (
                   <div className="cal-event" key={k} style={{ background: col.bg, borderLeftColor: col.border }}>
                     <div className="cal-time">{s.startTime}–{s.endTime} · Tiết {s.p1}-{s.p2}</div>

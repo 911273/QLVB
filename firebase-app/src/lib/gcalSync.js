@@ -63,11 +63,20 @@ export async function cleanupPrimary(sessions, token, onProgress) {
   return { deleted };
 }
 
+// Màu sự kiện theo MÔN (Google colorId 1..11) -> mỗi môn một màu ổn định.
+function courseColorId(course) {
+  const s = String(course || '');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return String((h % 11) + 1);
+}
+
 function eventBody(s) {
   return {
     summary: s.lessonShort ? `${s.subject} — ${s.lessonShort}` : s.subject,
     description: s.lesson || undefined,
     location: s.room,
+    colorId: courseColorId(s.course),
     start: { dateTime: `${s.date}T${s.startTime}:00`, timeZone: TZ },
     end: { dateTime: `${s.date}T${s.endTime}:00`, timeZone: TZ },
   };
