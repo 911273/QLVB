@@ -648,6 +648,12 @@ select:focus {
   color: var(--muted);
   margin-top: 0.15rem;
 }
+.cal-lesson {
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+  color: #1d4ed8;
+  line-height: 1.2;
+}
 
 /* ---------- Quiz (Trộn đề & chấm) ---------- */
 .quiz-textarea {

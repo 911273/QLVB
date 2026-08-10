@@ -6,6 +6,7 @@ import { db } from '../firebase.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { buildSessions, buildGcalCsv, buildIcs } from '../lib/timetable.js';
 import { syncToGoogleCalendar } from '../lib/gcalSync.js';
+import { parsePlan, assignLessons } from '../lib/lessonPlan.js';
 
 function downloadFile(filename, content, mime) {
   const blob = new Blob([content], { type: mime });
@@ -55,6 +56,8 @@ export default function Schedule() {
   const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | error
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
+  const [planRows, setPlanRows] = useState(null); // kế hoạch giảng dạy (aoa)
+  const [planName, setPlanName] = useState('');
 
   // Khôi phục lịch đã lưu của người dùng (nếu có).
   useEffect(() => {
@@ -69,6 +72,8 @@ export default function Schedule() {
         if (d.week1) setWeek1(d.week1);
         if (typeof d.offset !== 'undefined') setOffset(d.offset);
         if (d.fileName) setFileName(d.fileName);
+        if (d.planJson) setPlanRows(JSON.parse(d.planJson));
+        if (d.planName) setPlanName(d.planName);
         setSaveState('saved');
       } catch {
         /* Firestore chưa sẵn sàng -> vẫn dùng ngoại tuyến được */
@@ -89,11 +94,49 @@ export default function Schedule() {
         offset: Number(off) || 0,
         fileName: fname || '',
         updatedAt: serverTimestamp(),
-      });
+      }, { merge: true });
       setSaveState('saved');
     } catch {
       setSaveState('error');
     }
+  }
+
+  // Lưu kế hoạch giảng dạy (best-effort, merge để không đè lịch).
+  async function persistPlan(planAoa, pName) {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, 'schedules', user.uid), {
+        uid: user.uid,
+        planJson: planAoa ? JSON.stringify(planAoa) : '',
+        planName: pName || '',
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    } catch { /* bỏ qua */ }
+  }
+
+  async function handlePlanFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError('');
+    try {
+      const XLSX = await import('xlsx');
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+      setPlanRows(data);
+      setPlanName(file.name);
+      persistPlan(data, file.name);
+    } catch (err) {
+      setError('Không đọc được file kế hoạch: ' + (err?.message || err));
+    } finally {
+      e.target.value = '';
+    }
+  }
+  function clearPlan() {
+    setPlanRows(null);
+    setPlanName('');
+    persistPlan(null, '');
   }
 
   async function handleFile(e) {
@@ -135,10 +178,20 @@ export default function Schedule() {
     return d;
   }, [week1, offset]);
 
+  const planByCourse = useMemo(() => {
+    if (!planRows) return {};
+    try { return parsePlan(planRows); } catch { return {}; }
+  }, [planRows]);
+
   const sessions = useMemo(() => {
     if (!rows || !baseMonday) return [];
-    try { return buildSessions(rows, baseMonday); } catch { return []; }
-  }, [rows, baseMonday]);
+    try {
+      const base = buildSessions(rows, baseMonday);
+      return Object.keys(planByCourse).length ? assignLessons(base, planByCourse) : base;
+    } catch { return []; }
+  }, [rows, baseMonday, planByCourse]);
+
+  const lessonCount = useMemo(() => sessions.filter((s) => s.lesson).length, [sessions]);
 
   const weeks = useMemo(
     () => Array.from(new Set(sessions.map((s) => s.week))).sort((a, b) => a - b),
@@ -195,7 +248,18 @@ export default function Schedule() {
             3. Dịch tuần (±)
             <input type="number" value={offset} onChange={(e) => onOffsetChange(e.target.value)} />
           </label>
+          <label className="sched-field">
+            4. Kế hoạch giảng dạy (Excel) — tùy chọn
+            <input type="file" accept=".xls,.xlsx,.xlsm" onChange={handlePlanFile} />
+          </label>
         </div>
+
+        {planName && (
+          <div className="sched-status">
+            <span className="save-ok">📚 Kế hoạch: <strong>{planName}</strong> — đã gán nội dung cho {lessonCount}/{sessions.length} buổi</span>
+            <button className="link" onClick={clearPlan}>Bỏ kế hoạch</button>
+          </div>
+        )}
 
         <div className="sched-status">
           {fileName && <span className="muted">Đã nạp: <strong>{fileName}</strong></span>}
@@ -307,6 +371,7 @@ function CalendarView({ sessions, weeks, baseMonday, selectedWeek, setSelectedWe
                   <div className="cal-event" key={k} style={{ background: col.bg, borderLeftColor: col.border }}>
                     <div className="cal-time">{s.startTime}–{s.endTime} · Tiết {s.p1}-{s.p2}</div>
                     <div className="cal-subj" style={{ color: col.text }}>{s.subject}</div>
+                    {s.lessonShort && <div className="cal-lesson">📖 {s.lessonShort}</div>}
                     <div className="cal-room">📍 {s.room}</div>
                   </div>
                 );
@@ -334,13 +399,14 @@ function TableView({ sessions, weeks }) {
       <div className="table-wrap">
         <table className="sched-table">
           <thead>
-            <tr><th>Tuần</th><th>Thứ</th><th>Ngày</th><th>Tiết</th><th>Giờ</th><th>Lớp - Môn</th><th>Phòng</th></tr>
+            <tr><th>Tuần</th><th>Thứ</th><th>Ngày</th><th>Tiết</th><th>Giờ</th><th>Lớp - Môn</th><th>Nội dung bài</th><th>Phòng</th></tr>
           </thead>
           <tbody>
             {visible.map((s, i) => (
               <tr key={i}>
                 <td>{s.week}</td><td>{s.thuLabel}</td><td>{s.date}</td>
-                <td>{s.p1}–{s.p2}</td><td>{s.startTime}–{s.endTime}</td><td>{s.subject}</td><td>{s.room}</td>
+                <td>{s.p1}–{s.p2}</td><td>{s.startTime}–{s.endTime}</td><td>{s.subject}</td>
+                <td>{s.lesson || ''}</td><td>{s.room}</td>
               </tr>
             ))}
           </tbody>

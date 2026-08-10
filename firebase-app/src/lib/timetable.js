@@ -163,12 +163,18 @@ function csvEscape(v) {
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
-/** Xuất CSV chuẩn Google Calendar (UTF-8 BOM). */
+/** Tiêu đề sự kiện: "Lớp - Môn" kèm nội dung bài học rút gọn (nếu có). */
+function eventSummary(s) {
+  return s.lessonShort ? `${s.subject} — ${s.lessonShort}` : s.subject;
+}
+
+/** Xuất CSV chuẩn Google Calendar (UTF-8 BOM), có cột Description = nội dung bài. */
 export function buildGcalCsv(sessions) {
-  const header = ['Subject', 'Start Date', 'Start Time', 'End Date', 'End Time', 'Location'];
+  const header = ['Subject', 'Start Date', 'Start Time', 'End Date', 'End Time', 'Location', 'Description'];
   const lines = [header.map(csvEscape).join(',')];
   for (const s of sessions) {
-    lines.push([s.subject, s.date, s.startTime, s.date, s.endTime, s.room].map(csvEscape).join(','));
+    lines.push([eventSummary(s), s.date, s.startTime, s.date, s.endTime, s.room, s.lesson || '']
+      .map(csvEscape).join(','));
   }
   return '﻿' + lines.join('\r\n') + '\r\n';
 }
@@ -193,7 +199,8 @@ export function buildIcs(sessions) {
       `DTSTAMP:${stamp}`,
       `DTSTART:${icsDt(s.date, s.startTime)}`,
       `DTEND:${icsDt(s.date, s.endTime)}`,
-      `SUMMARY:${icsEscape(s.subject)}`,
+      `SUMMARY:${icsEscape(eventSummary(s))}`,
+      ...(s.lesson ? [`DESCRIPTION:${icsEscape(s.lesson)}`] : []),
       `LOCATION:${icsEscape(s.room)}`,
       'END:VEVENT'
     );

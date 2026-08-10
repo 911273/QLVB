@@ -20,7 +20,8 @@ function eventId(s) {
 function eventBody(s) {
   return {
     id: eventId(s),
-    summary: s.subject,
+    summary: s.lessonShort ? `${s.subject} — ${s.lessonShort}` : s.subject,
+    description: s.lesson || undefined,
     location: s.room,
     start: { dateTime: `${s.date}T${s.startTime}:00`, timeZone: TZ },
     end: { dateTime: `${s.date}T${s.endTime}:00`, timeZone: TZ },
