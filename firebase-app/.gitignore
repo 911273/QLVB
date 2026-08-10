@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Local env (chứa Firebase config - KHÔNG commit)
+.env
+.env.local
+.env.*.local
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+
+# Editor / OS
+.DS_Store
+*.log
