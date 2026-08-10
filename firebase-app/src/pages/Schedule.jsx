@@ -5,7 +5,7 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { buildSessions, buildGcalCsv, buildIcs } from '../lib/timetable.js';
-import { syncToGoogleCalendar } from '../lib/gcalSync.js';
+import { syncToGoogleCalendar, cleanupPrimary } from '../lib/gcalSync.js';
 import { parsePlan, assignLessons } from '../lib/lessonPlan.js';
 
 function downloadFile(filename, content, mime) {
@@ -228,6 +228,23 @@ export default function Schedule() {
     }
   }
 
+  async function handleCleanupPrimary() {
+    if (!sessions.length) return;
+    if (!confirm('Xóa các buổi TKB (khớp lịch hiện tại) đã lỡ ghi vào Lịch chính trước đây?')) return;
+    setSyncing(true);
+    setSyncMsg('Đang xin quyền & dọn Lịch chính…');
+    try {
+      const token = await requestCalendarToken();
+      if (!token) throw new Error('Không lấy được quyền Google Calendar.');
+      const r = await cleanupPrimary(sessions, token, (d, t) => setSyncMsg(`Đang dọn ${d}/${t}…`));
+      setSyncMsg(`🧹 Đã xóa ${r.deleted} buổi cũ khỏi Lịch chính.`);
+    } catch (e) {
+      setSyncMsg('❌ Lỗi dọn lịch: ' + (e?.message || e));
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   const ready = rows && baseMonday;
 
   return (
@@ -285,6 +302,10 @@ export default function Schedule() {
             </button>
             <button className="btn btn-google" onClick={exportIcs} disabled={!sessions.length}>
               Xuất .ics
+            </button>
+            <button className="btn btn-ghost" style={{ width: 'auto', color: 'var(--danger)', borderColor: 'var(--border)' }}
+              onClick={handleCleanupPrimary} disabled={!sessions.length || syncing} title="Xóa các buổi TKB đã lỡ ghi vào Lịch chính (một lần)">
+              🧹 Dọn Lịch chính
             </button>
           </div>
         )}

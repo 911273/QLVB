@@ -34,6 +34,35 @@ function authHeaders(token, json) {
   return h;
 }
 
+// Id ổn định theo lược đồ CŨ (dùng để xóa các buổi đã lỡ ghi vào Lịch chính trước đây).
+function legacyEventId(s) {
+  const raw = `${s.date}|${s.p1}|${s.p2}|${s.class}|${s.course}|${s.room}`;
+  let h1 = 0x811c9dc5, h2 = 0x1000193;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw.charCodeAt(i);
+    h1 = (h1 ^ c) >>> 0; h1 = (h1 * 0x01000193) >>> 0;
+    h2 = (h2 * 31 + c) >>> 0;
+  }
+  const b = (n) => (n >>> 0).toString(32);
+  return 'tkb' + b(h1) + b(h2);
+}
+
+/**
+ * Xóa các buổi TKB đã lỡ ghi vào Lịch chính (primary) theo lược đồ id cũ.
+ * Chỉ xóa đúng sự kiện app từng tạo (id 'tkb...'), không đụng sự kiện khác.
+ */
+export async function cleanupPrimary(sessions, token, onProgress) {
+  let done = 0, deleted = 0;
+  for (const s of sessions) {
+    const res = await apiFetch(`${BASE}/calendars/primary/events/${legacyEventId(s)}`, { method: 'DELETE', headers: authHeaders(token) });
+    if (res.ok) deleted++; // 404/410 = đã không còn -> bỏ qua
+    done++;
+    if (onProgress) onProgress(done, sessions.length);
+    await sleep(100);
+  }
+  return { deleted };
+}
+
 function eventBody(s) {
   return {
     summary: s.lessonShort ? `${s.subject} — ${s.lessonShort}` : s.subject,
